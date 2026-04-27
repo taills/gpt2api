@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/mattn/go-sqlite3"
+	sqlitelib "modernc.org/sqlite/lib"
 
 	"github.com/432539/gpt2api/internal/audit"
 	"github.com/432539/gpt2api/pkg/resp"
@@ -258,8 +258,14 @@ func (h *AdminHandler) reloadRegistry(c *gin.Context) {
 	_ = h.registry.Reload(c.Request.Context())
 }
 
-// isDupSlug 判定 SQLite UNIQUE constraint violation (error code 19 / extended 2067).
+// isDupSlug 判定 SQLite UNIQUE constraint violation (extended error code 2067).
 func isDupSlug(err error) bool {
-	var se sqlite3.Error
-	return errors.As(err, &se) && se.ExtendedCode == sqlite3.ErrConstraintUnique
+	if err == nil {
+		return false
+	}
+	type coder interface{ Code() int }
+	if c, ok := err.(coder); ok {
+		return c.Code() == sqlitelib.SQLITE_CONSTRAINT_UNIQUE
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
