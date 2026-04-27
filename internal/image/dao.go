@@ -27,7 +27,7 @@ INSERT INTO image_tasks
   (task_id, user_id, key_id, model_id, account_id, prompt, n, size, upscale, status,
    conversation_id, file_ids, result_urls, error, estimated_credit, credit_cost,
    created_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, NOW())`,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, CURRENT_TIMESTAMP)`,
 		t.TaskID, t.UserID, t.KeyID, t.ModelID, t.AccountID,
 		t.Prompt, t.N, t.Size, ValidateUpscale(t.Upscale),
 		nullEmpty(t.Status, StatusQueued),
@@ -46,7 +46,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, NOW())`,
 func (d *DAO) MarkRunning(ctx context.Context, taskID string, accountID uint64) error {
 	_, err := d.db.ExecContext(ctx, `
 UPDATE image_tasks
-   SET status='running', account_id=?, started_at=NOW()
+   SET status='running', account_id=?, started_at=CURRENT_TIMESTAMP
  WHERE task_id=? AND status IN ('queued','dispatched')`, accountID, taskID)
 	return err
 }
@@ -72,7 +72,7 @@ UPDATE image_tasks
        file_ids=?,
        result_urls=?,
        credit_cost=?,
-       finished_at=NOW()
+       finished_at=CURRENT_TIMESTAMP
  WHERE task_id=?`, convID, fidB, urlB, creditCost, taskID)
 	return err
 }
@@ -88,7 +88,7 @@ func (d *DAO) UpdateCost(ctx context.Context, taskID string, cost int64) error {
 func (d *DAO) MarkFailed(ctx context.Context, taskID, errorCode string) error {
 	_, err := d.db.ExecContext(ctx, `
 UPDATE image_tasks
-   SET status='failed', error=?, finished_at=NOW()
+   SET status='failed', error=?, finished_at=CURRENT_TIMESTAMP
  WHERE task_id=?`, truncate(errorCode, 500), taskID)
 	return err
 }

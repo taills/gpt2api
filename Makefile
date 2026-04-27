@@ -1,60 +1,55 @@
-.PHONY: help run build tidy test fmt vet lint migrate-up migrate-down migrate-status docker-up docker-down docker-logs
+.PHONY: help run build build-web build-all tidy test fmt vet
 
-SHELL := /bin/sh
+SHELL   := /bin/sh
 APP_NAME := gpt2api
-BIN_DIR := bin
-
-CONFIG ?= configs/config.yaml
-DSN ?= $(shell awk '/mysql:/,/^[^ ]/' $(CONFIG) | grep -E "^\s*dsn:" | head -1 | sed 's/.*dsn:\s*//;s/"//g')
+BIN_DIR  := bin
+WEB_DIR  := web
+EMBED_DIR := internal/server/web
 
 help:
-	@echo "Targets:"
-	@echo "  run              - go run cmd/server"
-	@echo "  build            - build binary to bin/$(APP_NAME)"
-	@echo "  tidy             - go mod tidy"
-	@echo "  test             - go test ./..."
-	@echo "  fmt              - gofmt -w"
-	@echo "  vet              - go vet ./..."
-	@echo "  migrate-up       - goose up"
-	@echo "  migrate-down     - goose down"
-	@echo "  migrate-status   - goose status"
-	@echo "  docker-up        - docker compose up -d"
-	@echo "  docker-down      - docker compose down"
-	@echo "  docker-logs      - docker compose logs -f"
+@echo "Targets:"
+@echo "  build-web   - npm run build → copy dist into embed dir"
+@echo "  build       - go build (embeds whatever is in $(EMBED_DIR))"
+@echo "  build-all   - build-web then build (single-binary release)"
+@echo "  run         - go run cmd/server (uses ./web/dist from disk if present)"
+@echo "  tidy        - go mod tidy"
+@echo "  test        - go test ./..."
+@echo "  fmt         - gofmt -w ."
+@echo "  vet         - go vet ./..."
 
-run:
-	go run ./cmd/server
+# ---- frontend ----
+build-web:
+@echo "[build-web] installing npm deps..."
+cd $(WEB_DIR) && npm install --no-audit --no-fund --loglevel=error
+@echo "[build-web] building frontend..."
+cd $(WEB_DIR) && npm run build
+@echo "[build-web] copying dist → $(EMBED_DIR)/"
+@rm -rf $(EMBED_DIR)
+@mkdir -p $(EMBED_DIR)
+@cp -r $(WEB_DIR)/dist/. $(EMBED_DIR)/
+@echo "[build-web] done."
 
+# ---- backend (embeds current $(EMBED_DIR) content) ----
 build:
-	@mkdir -p $(BIN_DIR)
-	go build -ldflags "-s -w" -o $(BIN_DIR)/$(APP_NAME) ./cmd/server
+@mkdir -p $(BIN_DIR)
+go build -ldflags "-s -w" -o $(BIN_DIR)/$(APP_NAME) ./cmd/server
+@echo "[build] binary: $(BIN_DIR)/$(APP_NAME)"
+
+# ---- combined: frontend + backend → single binary ----
+build-all: build-web build
+
+# ---- dev / util ----
+run:
+go run ./cmd/server
 
 tidy:
-	go mod tidy
+go mod tidy
 
 test:
-	go test ./...
+go test ./...
 
 fmt:
-	gofmt -w .
+gofmt -w .
 
 vet:
-	go vet ./...
-
-migrate-up:
-	goose -dir sql/migrations mysql "$(DSN)" up
-
-migrate-down:
-	goose -dir sql/migrations mysql "$(DSN)" down
-
-migrate-status:
-	goose -dir sql/migrations mysql "$(DSN)" status
-
-docker-up:
-	docker compose -f deploy/docker-compose.yml up -d
-
-docker-down:
-	docker compose -f deploy/docker-compose.yml down
-
-docker-logs:
-	docker compose -f deploy/docker-compose.yml logs -f
+go vet ./...

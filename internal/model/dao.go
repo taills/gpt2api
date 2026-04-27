@@ -112,9 +112,9 @@ func (d *DAO) SetEnabled(ctx context.Context, id uint64, enabled bool) error {
 func (d *DAO) SoftDelete(ctx context.Context, id uint64) error {
 	res, err := d.db.ExecContext(ctx, `
 UPDATE models
-   SET deleted_at = NOW(),
+   SET deleted_at = CURRENT_TIMESTAMP,
        enabled    = 0,
-       slug       = CONCAT(slug, '#del', id)
+       slug       = slug || '#del' || CAST(id AS TEXT)
  WHERE id = ? AND deleted_at IS NULL`, id)
 	if err != nil {
 		return err

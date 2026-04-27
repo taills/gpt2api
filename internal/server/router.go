@@ -7,7 +7,6 @@ import (
 	"github.com/432539/gpt2api/internal/apikey"
 	"github.com/432539/gpt2api/internal/audit"
 	"github.com/432539/gpt2api/internal/auth"
-	"github.com/432539/gpt2api/internal/backup"
 	"github.com/432539/gpt2api/internal/channel"
 	"github.com/432539/gpt2api/internal/config"
 	"github.com/432539/gpt2api/internal/gateway"
@@ -16,7 +15,6 @@ import (
 	"github.com/432539/gpt2api/internal/model"
 	"github.com/432539/gpt2api/internal/proxy"
 	"github.com/432539/gpt2api/internal/rbac"
-	"github.com/432539/gpt2api/internal/recharge"
 	"github.com/432539/gpt2api/internal/settings"
 	"github.com/432539/gpt2api/internal/usage"
 	"github.com/432539/gpt2api/internal/user"
@@ -41,11 +39,10 @@ type Deps struct {
 	GatewayH *gateway.Handler
 	ImagesH  *gateway.ImagesHandler
 
-	BackupH      *backup.Handler
-	AuditH       *audit.Handler
-	AuditDAO     *audit.DAO
-	AdminUserH   *user.AdminHandler
-	AdminGroupH  *user.AdminGroupHandler
+	AuditH      *audit.Handler
+	AuditDAO    *audit.DAO
+	AdminUserH  *user.AdminHandler
+	AdminGroupH *user.AdminGroupHandler
 
 	AdminModelH *model.AdminHandler
 	AdminKeyH   *apikey.AdminHandler
@@ -56,9 +53,6 @@ type Deps struct {
 	MeImageH *image.MeHandler
 
 	AdminImageH *image.AdminHandler
-
-	RechargeH      *recharge.Handler
-	AdminRechargeH *recharge.AdminHandler
 
 	SettingsH *settings.Handler
 }
@@ -104,17 +98,6 @@ func New(d *Deps) *gin.Engine {
 				keys.DELETE("/:id", d.KeyH.Delete)
 			}
 
-			// 充值(自己的订单、下单、取消)
-			if d.RechargeH != nil {
-				rg := authed.Group("/recharge", middleware.RequirePerm(rbac.PermSelfRecharge))
-				{
-					rg.GET("/packages", d.RechargeH.ListPackages)
-					rg.POST("/orders", d.RechargeH.CreateOrder)
-					rg.GET("/orders", d.RechargeH.ListMyOrders)
-					rg.POST("/orders/:id/cancel", d.RechargeH.CancelOrder)
-				}
-			}
-
 			// 生成面板:当前用户的用量明细(文字 token) + 图片任务历史
 			if d.MeUsageH != nil {
 				ug := authed.Group("/me/usage", middleware.RequirePerm(rbac.PermSelfUsage))
@@ -155,10 +138,6 @@ func New(d *Deps) *gin.Engine {
 		pub := api.Group("/public")
 		if d.SettingsH != nil {
 			pub.GET("/site-info", d.SettingsH.Public)
-		}
-		if d.RechargeH != nil {
-			pub.POST("/epay/notify", d.RechargeH.EPayNotify)
-			pub.GET("/epay/notify", d.RechargeH.EPayNotify)
 		}
 
 		// admin 全组强制 RequireAdmin;所有写操作再通过 audit.Middleware 自动落审计。
@@ -324,19 +303,6 @@ func New(d *Deps) *gin.Engine {
 				}
 			}
 
-			// ---- 充值套餐 + 订单 ----
-			if d.AdminRechargeH != nil {
-				rg := admin.Group("/recharge", middleware.RequirePerm(rbac.PermRechargeManage))
-				{
-					rg.GET("/packages", d.AdminRechargeH.ListPackages)
-					rg.POST("/packages", d.AdminRechargeH.CreatePackage)
-					rg.PATCH("/packages/:id", d.AdminRechargeH.UpdatePackage)
-					rg.DELETE("/packages/:id", d.AdminRechargeH.DeletePackage)
-					rg.GET("/orders", d.AdminRechargeH.ListOrders)
-					rg.POST("/orders/:id/force-paid", d.AdminRechargeH.ForcePaid)
-				}
-			}
-
 			// 系统设置(站点 / 注册 / SMTP 测试 等)
 			if d.SettingsH != nil {
 				sg := admin.Group("/settings", middleware.RequirePerm(rbac.PermSystemSetting))
@@ -345,19 +311,6 @@ func New(d *Deps) *gin.Engine {
 					sg.PUT("", d.SettingsH.Update)
 					sg.POST("/reload", d.SettingsH.Reload)
 					sg.POST("/test-email", d.SettingsH.TestMail)
-				}
-			}
-
-			// 数据库备份/恢复(超高危,细粒度权限 + handler 内二次密码)
-			if d.BackupH != nil {
-				bg := admin.Group("/system/backup", middleware.RequirePerm(rbac.PermSystemBackup))
-				{
-					bg.GET("", d.BackupH.List)
-					bg.POST("", d.BackupH.Create)
-					bg.GET("/:id/download", d.BackupH.Download)
-					bg.DELETE("/:id", d.BackupH.Delete)
-					bg.POST("/:id/restore", d.BackupH.Restore)
-					bg.POST("/upload", d.BackupH.Upload)
 				}
 			}
 		}

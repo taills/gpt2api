@@ -138,12 +138,12 @@ func (d *DAO) ListDispatchable(ctx context.Context, limit int) ([]*Account, erro
 		`SELECT * FROM oai_accounts
          WHERE deleted_at IS NULL AND status IN ('healthy', 'warned')
            AND (cooldown_until IS NULL OR cooldown_until <= ?)
-           AND (token_expires_at IS NULL OR token_expires_at > ?)
+           AND (token_expires_at IS NULL OR token_expires_at > CURRENT_TIMESTAMP)
          ORDER BY
            CASE status WHEN 'healthy' THEN 0 ELSE 1 END,
            CASE WHEN last_used_at IS NULL THEN 0 ELSE 1 END,
            last_used_at ASC
-         LIMIT ?`, now, now, limit)
+         LIMIT ?`, now, limit)
 	fillAll(rows)
 	return rows, err
 }
@@ -178,12 +178,12 @@ func (d *DAO) ListNeedProbeQuota(ctx context.Context, minIntervalSec int, limit 
 		`SELECT * FROM oai_accounts
          WHERE deleted_at IS NULL
            AND status = 'healthy'
-           AND (token_expires_at IS NULL OR token_expires_at > NOW())
+           AND (token_expires_at IS NULL OR token_expires_at > CURRENT_TIMESTAMP)
            AND (
                 image_quota_updated_at IS NULL
              OR image_quota_updated_at <= ?
              OR (image_quota_remaining = 0
-                 AND (image_quota_reset_at IS NULL OR image_quota_reset_at <= NOW()))
+                 AND (image_quota_reset_at IS NULL OR image_quota_reset_at <= CURRENT_TIMESTAMP))
            )
          ORDER BY CASE WHEN image_quota_updated_at IS NULL THEN 0 ELSE 1 END,
                   image_quota_updated_at ASC
@@ -379,7 +379,7 @@ func (d *DAO) RecordRefreshError(ctx context.Context, id uint64, source string, 
 			`UPDATE oai_accounts
              SET last_refresh_at = ?, last_refresh_source = ?, refresh_error = ?,
                  status = CASE
-                   WHEN token_expires_at IS NOT NULL AND token_expires_at > NOW() THEN 'warned'
+                   WHEN token_expires_at IS NOT NULL AND token_expires_at > CURRENT_TIMESTAMP THEN 'warned'
                    ELSE 'dead'
                  END
              WHERE id = ? AND deleted_at IS NULL`,
@@ -408,7 +408,7 @@ func (d *DAO) RecordRefreshError(ctx context.Context, id uint64, source string, 
 func (d *DAO) ApplyQuotaResult(ctx context.Context, id uint64, remaining, total int, resetAt *time.Time) error {
 	q := `UPDATE oai_accounts
           SET image_quota_remaining = CASE WHEN ? < 0 THEN image_quota_remaining ELSE ? END,
-              image_quota_total     = GREATEST(
+              image_quota_total     = MAX(
                   image_quota_total,
                   CASE WHEN ? < 0 THEN 0 ELSE ? END,
                   CASE WHEN ? < 0 THEN 0 ELSE ? END
@@ -439,7 +439,7 @@ func (d *DAO) DecrQuota(ctx context.Context, accountID uint64, n int) error {
 	}
 	_, err := d.db.ExecContext(ctx,
 		`UPDATE oai_accounts
-         SET image_quota_remaining = GREATEST(0, image_quota_remaining - ?)
+         SET image_quota_remaining = MAX(0, image_quota_remaining - ?)
          WHERE id = ? AND deleted_at IS NULL`,
 		n, accountID)
 	return err
@@ -451,7 +451,7 @@ func (d *DAO) UpsertCookies(ctx context.Context, accountID uint64, cookieEnc str
 	_, err := d.db.ExecContext(ctx,
 		`INSERT INTO oai_account_cookies (account_id, cookie_json_enc)
          VALUES (?, ?)
-         ON DUPLICATE KEY UPDATE cookie_json_enc = VALUES(cookie_json_enc)`,
+         ON CONFLICT(account_id) DO UPDATE SET cookie_json_enc = excluded.cookie_json_enc`,
 		accountID, cookieEnc)
 	return err
 }
@@ -473,7 +473,7 @@ func (d *DAO) SetBinding(ctx context.Context, accountID, proxyID uint64) error {
 	_, err := d.db.ExecContext(ctx,
 		`INSERT INTO account_proxy_bindings (account_id, proxy_id)
          VALUES (?, ?)
-         ON DUPLICATE KEY UPDATE proxy_id = VALUES(proxy_id), bound_at = CURRENT_TIMESTAMP`,
+         ON CONFLICT(account_id) DO UPDATE SET proxy_id = excluded.proxy_id, bound_at = CURRENT_TIMESTAMP`,
 		accountID, proxyID)
 	return err
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	mysqlDrv "github.com/go-sql-driver/mysql"
+	"github.com/mattn/go-sqlite3"
 
 	"github.com/432539/gpt2api/internal/audit"
 	"github.com/432539/gpt2api/pkg/resp"
@@ -258,8 +258,8 @@ func (h *AdminHandler) reloadRegistry(c *gin.Context) {
 	_ = h.registry.Reload(c.Request.Context())
 }
 
-// isDupSlug 判定 MySQL 1062 Duplicate entry。
+// isDupSlug 判定 SQLite UNIQUE constraint violation (error code 19 / extended 2067).
 func isDupSlug(err error) bool {
-	var me *mysqlDrv.MySQLError
-	return errors.As(err, &me) && me.Number == 1062
+	var se sqlite3.Error
+	return errors.As(err, &se) && se.ExtendedCode == sqlite3.ErrConstraintUnique
 }

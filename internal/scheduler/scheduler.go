@@ -65,7 +65,7 @@ type RuntimeParams struct {
 type Scheduler struct {
 	accSvc   *account.Service
 	proxySvc *proxy.Service
-	lock     *lock.RedisLock
+	lock     *lock.MemoryLock
 	cfg      config.SchedulerConfig
 	rt       RuntimeParams
 }
@@ -73,7 +73,7 @@ type Scheduler struct {
 func New(
 	accSvc *account.Service,
 	proxySvc *proxy.Service,
-	rl *lock.RedisLock,
+	rl *lock.MemoryLock,
 	cfg config.SchedulerConfig,
 ) *Scheduler {
 	if cfg.LockTTLSec <= 0 {

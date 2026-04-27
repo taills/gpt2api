@@ -18,10 +18,10 @@ import (
 
 // Limiter 是"按 Key 维度"的限流服务。
 type Limiter struct {
-	tb *pkgrl.TokenBucket
+	tb *pkgrl.MemoryBucket
 }
 
-func New(tb *pkgrl.TokenBucket) *Limiter { return &Limiter{tb: tb} }
+func New(tb *pkgrl.MemoryBucket) *Limiter { return &Limiter{tb: tb} }
 
 // AllowRPM 消费 1 个 RPM 令牌。capacity<=0 表示不限。
 func (l *Limiter) AllowRPM(ctx context.Context, keyID uint64, capacity int) (bool, float64, error) {

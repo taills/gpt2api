@@ -140,7 +140,7 @@ func (d *DAO) ResetPassword(ctx context.Context, id uint64, hash string) error {
 // 被删除的用户无法登录,api key 按策略可单独吊销。
 func (d *DAO) SoftDelete(ctx context.Context, id uint64) error {
 	res, err := d.db.ExecContext(ctx,
-		`UPDATE users SET deleted_at = NOW(), status = 'banned', version = version + 1
+		`UPDATE users SET deleted_at = CURRENT_TIMESTAMP, status = 'banned', version = version + 1
           WHERE id = ? AND deleted_at IS NULL`, id)
 	if err != nil {
 		return err
@@ -214,7 +214,7 @@ func (d *DAO) DeleteGroup(ctx context.Context, id uint64) error {
 		return fmt.Errorf("group in use by %d users", used)
 	}
 	res, err := d.db.ExecContext(ctx,
-		`UPDATE user_groups SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL`, id)
+		`UPDATE user_groups SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL`, id)
 	if err != nil {
 		return err
 	}
@@ -325,7 +325,7 @@ SELECT ct.id, ct.user_id,
        COALESCE(u.email,    '') AS user_email,
        COALESCE(u.nickname, '') AS user_nickname,
        ct.key_id, ct.type, ct.amount, ct.balance_after, ct.ref_id, ct.remark,
-       DATE_FORMAT(ct.created_at, '%%Y-%%m-%%d %%H:%%i:%%s') AS created_at
+       strftime('%%Y-%%m-%%d %%H:%%M:%%S', ct.created_at) AS created_at
   FROM credit_transactions ct
   LEFT JOIN users u ON u.id = ct.user_id
  WHERE %s
@@ -350,10 +350,10 @@ func (d *DAO) CreditSummary(ctx context.Context) (CreditSummary, error) {
 	var s CreditSummary
 	err := d.db.GetContext(ctx, &s, `
 SELECT
-  COALESCE(SUM(CASE WHEN amount > 0 AND DATE(created_at) = CURDATE() THEN amount ELSE 0 END), 0) AS in_today,
-  COALESCE(-SUM(CASE WHEN amount < 0 AND DATE(created_at) = CURDATE() THEN amount ELSE 0 END), 0) AS out_today,
-  COALESCE(SUM(CASE WHEN amount > 0 AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN amount ELSE 0 END), 0) AS in_7days,
-  COALESCE(-SUM(CASE WHEN amount < 0 AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN amount ELSE 0 END), 0) AS out_7days,
+  COALESCE(SUM(CASE WHEN amount > 0 AND date(created_at) = date('now') THEN amount ELSE 0 END), 0) AS in_today,
+  COALESCE(-SUM(CASE WHEN amount < 0 AND date(created_at) = date('now') THEN amount ELSE 0 END), 0) AS out_today,
+  COALESCE(SUM(CASE WHEN amount > 0 AND created_at >= datetime('now', '-7 days') THEN amount ELSE 0 END), 0) AS in_7days,
+  COALESCE(-SUM(CASE WHEN amount < 0 AND created_at >= datetime('now', '-7 days') THEN amount ELSE 0 END), 0) AS out_7days,
   COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS in_total,
   COALESCE(-SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END), 0) AS out_total,
   0 AS total_balance
@@ -394,7 +394,7 @@ func (d *DAO) ListCreditLogs(ctx context.Context, userID uint64, limit, offset i
 	var out []CreditLog
 	err := d.db.SelectContext(ctx, &out, `
 SELECT id, user_id, key_id, type, amount, balance_after, ref_id, remark,
-       DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS created_at
+       strftime('%Y-%m-%d %H:%M:%S', created_at) AS created_at
   FROM credit_transactions `+where+`
  ORDER BY id DESC
  LIMIT ? OFFSET ?`, argsPaged...)

@@ -17,7 +17,7 @@ func (d *DAO) Insert(ctx context.Context, l *Log) error {
 	_, err := d.db.ExecContext(ctx, `
 INSERT INTO admin_audit_logs
   (actor_id, actor_email, action, method, path, status_code, ip, ua, target, meta, created_at)
-VALUES (?,?,?,?,?,?,?,?,?,?, NOW())`,
+VALUES (?,?,?,?,?,?,?,?,?,?, CURRENT_TIMESTAMP)`,
 		l.ActorID, l.ActorEmail, l.Action, l.Method, l.Path, l.StatusCode,
 		l.IP, truncate(l.UA, 255), l.Target, nullJSON(l.Meta))
 	if err != nil {
