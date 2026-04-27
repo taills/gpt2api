@@ -46,7 +46,7 @@ async function onSubmit() {
   try {
     await store.login(form.email, form.password)
     ElMessage.success('登录成功')
-    const redirect = (route.query.redirect as string) || '/personal/dashboard'
+    const redirect = (route.query.redirect as string) || '/personal/play'
     router.replace(redirect)
   } catch {
     // 错误已由 axios 拦截器 toast

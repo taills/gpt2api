@@ -24,7 +24,7 @@ function goPlay() {
   if (loggedIn.value) router.push('/personal/play')
   else router.push('/login?redirect=/personal/play')
 }
-function goDashboard() { router.push('/personal/dashboard') }
+function goDashboard() { router.push('/personal/play') }
 function goLogin() { router.push('/login') }
 function goRegister() { router.push('/register') }
 function scrollTop() { window.scrollTo({ top: 0, behavior: 'smooth' }) }

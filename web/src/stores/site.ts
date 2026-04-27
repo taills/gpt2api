@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { fetchSiteInfo } from '@/api/settings'
+import { fetchSiteInfo } from '@/api/auth'
 
 /**
  * Site store 缓存站点公开信息:
