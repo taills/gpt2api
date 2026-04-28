@@ -2,11 +2,10 @@
 //
 // 职责:
 //   1. 鉴权(API Key,IP/模型白名单)
-//   2. 查模型 → 预扣积分
-//   3. 通过调度器拿账号 Lease
-//   4. 转译请求体 → 调用 chatgpt.com 上游
-//   5. 转译响应(流式 or 聚合) → OpenAI 协议
-//   6. 结算(真实 tokens) / 失败退款 / 释放账号锁 / 更新风控状态
+//   2. 通过调度器拿账号 Lease
+//   3. 转译请求体 → 调用 chatgpt.com 上游
+//   4. 转译响应(流式 or 聚合) → OpenAI 协议
+//   5. 释放账号锁 / 更新风控状态
 package gateway
 
 import (
@@ -24,14 +23,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/432539/gpt2api/internal/apikey"
-	"github.com/432539/gpt2api/internal/billing"
-	"github.com/432539/gpt2api/internal/channel"
 	modelpkg "github.com/432539/gpt2api/internal/model"
 	"github.com/432539/gpt2api/internal/ratelimit"
 	"github.com/432539/gpt2api/internal/scheduler"
 	"github.com/432539/gpt2api/internal/upstream/chatgpt"
 	"github.com/432539/gpt2api/internal/usage"
-	"github.com/432539/gpt2api/internal/user"
 	"github.com/432539/gpt2api/pkg/logger"
 )
 
@@ -39,9 +35,7 @@ import (
 type Handler struct {
 	Models    *modelpkg.Registry
 	Keys      *apikey.Service
-	Billing   *billing.Engine
 	Scheduler *scheduler.Scheduler
-	Groups    *user.GroupCache
 	Limiter   *ratelimit.Limiter
 	Usage     *usage.Logger
 	AccSvc    interface {
@@ -49,10 +43,6 @@ type Handler struct {
 	}
 	// Images 可选:若挂载,chat/completions 里指定图像模型会自动转派。
 	Images *ImagesHandler
-
-	// Channels 可选:若注入,则在本地模型命中渠道映射时优先走外置上游渠道,
-	// 未命中(ErrNoRoute)再回退到内置 ChatGPT 账号池。
-	Channels *channel.Router
 
 	// Settings 可选:若注入则在构造上游 client 时应用动态超时。
 	Settings interface {
@@ -168,20 +158,8 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 	}
 	rec.ModelID = m.ID
 
-	// 2) 分组倍率 + RPM/TPM
-	ratio := 1.0
+	// 2) RPM/TPM
 	rpmCap, tpmCap := ak.RPM, ak.TPM
-	if h.Groups != nil {
-		if g, err := h.Groups.OfUser(c.Request.Context(), ak.UserID); err == nil && g != nil {
-			ratio = g.Ratio
-			if rpmCap == 0 {
-				rpmCap = g.RPMLimit
-			}
-			if tpmCap == 0 {
-				tpmCap = g.TPMLimit
-			}
-		}
-	}
 
 	// 2a) RPM
 	if h.Limiter != nil {
@@ -195,21 +173,15 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 
 	// 优先走外置渠道。本地模型若配置了渠道映射,直接由适配器调用 OpenAI/Gemini
 	// 兼容接口并按 SSE 返回。handled=true 时已完成响应,直接收尾。
-	if h.Channels != nil {
-		if handled := h.dispatchChatToChannel(c, ak, m, &req, rec, ratio, rpmCap, tpmCap, startAt); handled {
-			return
-		}
-	}
 
-	// 3) 预扣(按 max_tokens 或 2048 估算)
+	// 3) 预估 tokens
 	promptTokens := roughEstimateTokens(req.Messages)
 	estTokens := req.MaxTokens
 	if estTokens <= 0 {
 		estTokens = 2048
 	}
-	estCost := billing.EstimateChat(m, promptTokens, req.MaxTokens, ratio)
 
-	// 2b) TPM(按估算 tokens 预扣,结算时按差额 adjust)
+	// 2b) TPM
 	if h.Limiter != nil {
 		if ok, _, err := h.Limiter.AllowTPM(c.Request.Context(), ak.ID, tpmCap,
 			int64(promptTokens+estTokens)); err == nil && !ok {
@@ -220,31 +192,12 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 		}
 	}
 
-	if err := h.Billing.PreDeduct(c.Request.Context(), ak.UserID, ak.ID, estCost, refID, "chat prepay"); err != nil {
-		if errors.Is(err, billing.ErrInsufficient) {
-			fail("insufficient_balance")
-			openAIError(c, http.StatusPaymentRequired, "insufficient_balance", "积分不足,请前往「账单与充值」充值后再试")
-			return
-		}
-		fail("billing_error")
-		openAIError(c, http.StatusInternalServerError, "billing_error", "计费异常:"+err.Error())
-		return
-	}
-
-	refunded := false
-	refund := func(code string) {
-		fail(code)
-		if refunded {
-			return
-		}
-		refunded = true
-		_ = h.Billing.Refund(context.Background(), ak.UserID, ak.ID, estCost, refID, "chat refund")
-	}
+	fail2 := func(code string) { fail(code) }
 
 	// 4) 调度账号
 	lease, err := h.Scheduler.Dispatch(c.Request.Context(), modelpkg.TypeChat)
 	if err != nil {
-		refund("no_account_available")
+		fail2("no_account_available")
 		openAIError(c, http.StatusServiceUnavailable, "no_account_available", "账号池暂无可用账号,请稍后重试")
 		return
 	}
@@ -262,7 +215,7 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 		Timeout:   h.upstreamTimeout(),
 	})
 	if err != nil {
-		refund("upstream_init_error")
+		fail2("upstream_init_error")
 		openAIError(c, http.StatusInternalServerError, "upstream_init_error", "上游客户端初始化失败:"+err.Error())
 		return
 	}
@@ -303,7 +256,7 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 
 	cr, err := cli.ChatRequirementsV2(reqCtx)
 	if err != nil {
-		h.handleUpstreamErr(c, lease, err, func() { refund("upstream_error") })
+		h.handleUpstreamErr(c, lease, err, func() { fail2("upstream_error") })
 		return
 	}
 
@@ -317,7 +270,7 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 		case <-proofCtx.Done():
 			cancelProof()
 			h.Scheduler.MarkWarned(c.Request.Context(), lease.Account.ID)
-			refund("pow_timeout")
+			fail2("pow_timeout")
 			openAIError(c, http.StatusServiceUnavailable, "pow_timeout",
 				"上游风控(PoW)未在规定时间内完成,请重试")
 			return
@@ -326,7 +279,7 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 		}
 		if proofToken == "" {
 			h.Scheduler.MarkWarned(c.Request.Context(), lease.Account.ID)
-			refund("pow_failed")
+			fail2("pow_failed")
 			openAIError(c, http.StatusServiceUnavailable, "pow_failed",
 				"上游风控(PoW)校验失败,请稍后重试")
 			return
@@ -383,7 +336,7 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 	// (d) f/conversation SSE
 	stream, err := cli.StreamFChat(c.Request.Context(), chatOpt)
 	if err != nil {
-		h.handleUpstreamErr(c, lease, err, func() { refund("upstream_error") })
+		h.handleUpstreamErr(c, lease, err, func() { fail2("upstream_error") })
 		return
 	}
 
@@ -395,15 +348,11 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 		h.collectOpenAI(c, id, req.Model, stream, cr.IsFreeAccount())
 	}
 
-	// 9) 结算
+	// 9) usage 记录
 	completionTokens := h.lastCompletionTokens(c)
-	actual := billing.ComputeChatCost(m, promptTokens, completionTokens, ratio)
-	if err := h.Billing.Settle(context.Background(), ak.UserID, ak.ID, estCost, actual, refID, "chat settle"); err != nil {
-		logger.L().Error("billing settle", zap.Error(err), zap.String("ref", refID))
-	}
-	_ = h.Keys.DAO().TouchUsage(context.Background(), ak.ID, c.ClientIP(), actual)
+	_ = h.Keys.DAO().TouchUsage(context.Background(), ak.ID, c.ClientIP(), 0)
 
-	// 10) TPM 差额补偿:真实 tokens 可能低于估算,这里可以 adjust 还桶。
+	// 10) TPM 差额补偿
 	if h.Limiter != nil {
 		real := int64(promptTokens + completionTokens)
 		est := int64(promptTokens + estTokens)
@@ -416,7 +365,6 @@ func (h *Handler) ChatCompletions(c *gin.Context) {
 	rec.Status = usage.StatusSuccess
 	rec.InputTokens = promptTokens
 	rec.OutputTokens = completionTokens
-	rec.CreditCost = actual
 }
 
 // streamOpenAI 将上游 SSE 事件转为 OpenAI 风格流式响应。

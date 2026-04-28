@@ -392,9 +392,6 @@ onMounted(async () => {
                 :value="m.slug"
               />
             </el-select>
-            <router-link to="/personal/keys">
-              <el-button text type="primary">没有 Key?去「API Keys」创建</el-button>
-            </router-link>
           </div>
 
           <el-tabs type="border-card" class="code-tabs">

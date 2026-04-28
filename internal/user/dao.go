@@ -19,19 +19,6 @@ type DAO struct {
 
 func NewDAO(db *sqlx.DB) *DAO { return &DAO{db: db} }
 
-// ---- user_groups ----
-
-func (d *DAO) GetGroup(ctx context.Context, id uint64) (*Group, error) {
-	var g Group
-	err := d.db.GetContext(ctx, &g,
-		`SELECT id, name, ratio, daily_limit_credits, rpm_limit, tpm_limit, remark, created_at, updated_at
-         FROM user_groups WHERE id = ? AND deleted_at IS NULL`, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	return &g, err
-}
-
 // ---- users ----
 
 func (d *DAO) GetByID(ctx context.Context, id uint64) (*User, error) {

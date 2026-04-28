@@ -9,19 +9,10 @@ log:
   format: console       # console | json
   output: stdout        # stdout | /var/log/gpt2api.log
 
-mysql:
-  dsn: "gpt2api:gpt2api@tcp(127.0.0.1:3306)/gpt2api?parseTime=true&loc=Local&charset=utf8mb4&collation=utf8mb4_unicode_ci"
-  # 开发期 100 够用;生产目标 2000 chat SSE + 1000 图,推荐 500,MySQL 侧 max_connections>=1000
-  max_open_conns: 100
-  max_idle_conns: 20
-  conn_max_lifetime_sec: 3600
-
-redis:
-  addr: "127.0.0.1:6379"
-  password: ""
-  db: 0
-  # 开发期 100;生产推荐 500(锁 + 队列 + 令牌桶并发高)
-  pool_size: 100
+# SQLite 数据库:单文件,无需额外服务
+# 相对路径从工作目录解析;Docker 容器中建议使用 /app/data/gpt2api.db
+sqlite:
+  path: "data/gpt2api.db"
 
 jwt:
   secret: "CHANGE_ME_TO_RANDOM_32_BYTES_SECRET"
@@ -52,16 +43,6 @@ upstream:
   base_url: "https://chatgpt.com"
   request_timeout_sec: 60
   sse_read_timeout_sec: 300
-
-# 支付(易支付)
-epay:
-  gateway_url: ""
-  pid: ""
-  key: ""
-  notify_url: ""
-  return_url: ""
-  sign_type: "MD5"
-  expires_min: 30
 
 smtp:
   host: ""

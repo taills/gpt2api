@@ -14,15 +14,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 
 	"github.com/432539/gpt2api/internal/apikey"
-	"github.com/432539/gpt2api/internal/billing"
 	"github.com/432539/gpt2api/internal/image"
 	modelpkg "github.com/432539/gpt2api/internal/model"
 	"github.com/432539/gpt2api/internal/upstream/chatgpt"
 	"github.com/432539/gpt2api/internal/usage"
-	"github.com/432539/gpt2api/pkg/logger"
 )
 
 // 单张参考图的硬上限(字节)。chatgpt.com 的 /backend-api/files 实测上限大致 20MB。
@@ -164,17 +161,8 @@ func (h *ImagesHandler) ImageGenerations(c *gin.Context) {
 	}
 	rec.ModelID = m.ID
 
-	// 2) 分组倍率 + RPM 限流(图像不走 TPM)
-	ratio := 1.0
+	// 2) RPM 限流(图像不走 TPM)
 	rpmCap := ak.RPM
-	if h.Groups != nil {
-		if g, err := h.Groups.OfUser(c.Request.Context(), ak.UserID); err == nil && g != nil {
-			ratio = g.Ratio
-			if rpmCap == 0 {
-				rpmCap = g.RPMLimit
-			}
-		}
-	}
 	if h.Limiter != nil {
 		if ok, _, err := h.Limiter.AllowRPM(c.Request.Context(), ak.ID, rpmCap); err == nil && !ok {
 			fail("rate_limit_rpm")
@@ -186,50 +174,21 @@ func (h *ImagesHandler) ImageGenerations(c *gin.Context) {
 
 	// 若本地模型配置了外置渠道(OpenAI DALL·E / Gemini imagen 等),优先走渠道。
 	// 参考图场景(reference_images)仍走原 ChatGPT 账号池 Runner。
-	if h.Channels != nil {
-		if handled := h.dispatchImageToChannel(c, ak, m, &req, rec, ratio); handled {
-			return
-		}
-	}
 
-	// 3) 预扣(图像按定价,est = actual)
-	cost := billing.ComputeImageCost(m, req.N, ratio)
-	if cost > 0 {
-		if err := h.Billing.PreDeduct(c.Request.Context(), ak.UserID, ak.ID, cost, refID, "image prepay"); err != nil {
-			if errors.Is(err, billing.ErrInsufficient) {
-				fail("insufficient_balance")
-				openAIError(c, http.StatusPaymentRequired, "insufficient_balance",
-					"积分不足,请前往「账单与充值」充值后再试")
-				return
-			}
-			fail("billing_error")
-			openAIError(c, http.StatusInternalServerError, "billing_error", "计费异常:"+err.Error())
-			return
-		}
-	}
-	refunded := false
-	refund := func(code string) {
-		fail(code)
-		if refunded || cost == 0 {
-			return
-		}
-		refunded = true
-		_ = h.Billing.Refund(context.Background(), ak.UserID, ak.ID, cost, refID, "image refund")
-	}
+	refund := func(code string) { fail(code) }
 
 	// 4) 落任务
 	taskID := image.GenerateTaskID()
 	task := &image.Task{
-		TaskID:          taskID,
-		UserID:          ak.UserID,
-		KeyID:           ak.ID,
-		ModelID:         m.ID,
-		Prompt:          req.Prompt,
-		N:               req.N,
-		Size:            req.Size,
-		Upscale:         req.Upscale,
-		Status:          image.StatusDispatched,
-		EstimatedCredit: cost,
+		TaskID:  taskID,
+		UserID:  ak.UserID,
+		KeyID:   ak.ID,
+		ModelID: m.ID,
+		Prompt:  req.Prompt,
+		N:       req.N,
+		Size:    req.Size,
+		Upscale: req.Upscale,
+		Status:  image.StatusDispatched,
 	}
 	if h.DAO != nil {
 		if err := h.DAO.Create(c.Request.Context(), task); err != nil {
@@ -288,17 +247,9 @@ func (h *ImagesHandler) ImageGenerations(c *gin.Context) {
 		return
 	}
 
-	// 6) 结算
-	if cost > 0 {
-		if err := h.Billing.Settle(context.Background(), ak.UserID, ak.ID, cost, cost, refID, "image settle"); err != nil {
-			logger.L().Error("billing settle image", zap.Error(err), zap.String("ref", refID))
-		}
-	}
-	_ = h.Keys.DAO().TouchUsage(context.Background(), ak.ID, c.ClientIP(), cost)
-
-	// 7) usage
+	// 6) usage
+	_ = h.Keys.DAO().TouchUsage(context.Background(), ak.ID, c.ClientIP(), 0)
 	rec.Status = usage.StatusSuccess
-	rec.CreditCost = cost
 	// 实际产出张数:优先按 SignedURLs 计数,空时回落到请求张数,
 	// 兜底再回落到 1 —— 旧版只写 0 会让"图片张数"统计长期偏小。
 	rec.ImageCount = len(res.SignedURLs)
@@ -309,9 +260,9 @@ func (h *ImagesHandler) ImageGenerations(c *gin.Context) {
 		rec.ImageCount = 1
 	}
 
-	// 8) DAO 回写 credit_cost(Runner 已经 MarkSuccess,这里只补 credit_cost)
+	// 8) DAO 回写
 	if h.DAO != nil {
-		_ = h.DAO.UpdateCost(c.Request.Context(), taskID, cost)
+		_ = h.DAO.UpdateCost(c.Request.Context(), taskID, 0)
 	}
 
 	// 9) 响应:URL 统一走自家代理,防止 chatgpt.com estuary/content 防盗链
@@ -404,19 +355,8 @@ func (h *ImagesHandler) handleChatAsImage(c *gin.Context, rec *usage.Log, ak *ap
 		return
 	}
 
-	refID := uuid.NewString()
-
-	// 倍率 + RPM
-	ratio := 1.0
+	// RPM
 	rpmCap := ak.RPM
-	if h.Groups != nil {
-		if g, err := h.Groups.OfUser(c.Request.Context(), ak.UserID); err == nil && g != nil {
-			ratio = g.Ratio
-			if rpmCap == 0 {
-				rpmCap = g.RPMLimit
-			}
-		}
-	}
 	if h.Limiter != nil {
 		if ok, _, err := h.Limiter.AllowRPM(c.Request.Context(), ak.ID, rpmCap); err == nil && !ok {
 			rec.Status = usage.StatusFailed
@@ -427,45 +367,22 @@ func (h *ImagesHandler) handleChatAsImage(c *gin.Context, rec *usage.Log, ak *ap
 		}
 	}
 
-	// 预扣
-	cost := billing.ComputeImageCost(m, 1, ratio)
-	if cost > 0 {
-		if err := h.Billing.PreDeduct(c.Request.Context(), ak.UserID, ak.ID, cost, refID, "chat->image prepay"); err != nil {
-			rec.Status = usage.StatusFailed
-			if errors.Is(err, billing.ErrInsufficient) {
-				rec.ErrorCode = "insufficient_balance"
-				openAIError(c, http.StatusPaymentRequired, "insufficient_balance",
-					"积分不足,请前往「账单与充值」充值后再试")
-				return
-			}
-			rec.ErrorCode = "billing_error"
-			openAIError(c, http.StatusInternalServerError, "billing_error", "计费异常:"+err.Error())
-			return
-		}
-	}
-	refunded := false
 	refund := func(code string) {
 		rec.Status = usage.StatusFailed
 		rec.ErrorCode = code
-		if refunded || cost == 0 {
-			return
-		}
-		refunded = true
-		_ = h.Billing.Refund(context.Background(), ak.UserID, ak.ID, cost, refID, "chat->image refund")
 	}
 
 	taskID := image.GenerateTaskID()
 	if h.DAO != nil {
 		_ = h.DAO.Create(c.Request.Context(), &image.Task{
-			TaskID:          taskID,
-			UserID:          ak.UserID,
-			KeyID:           ak.ID,
-			ModelID:         m.ID,
-			Prompt:          prompt,
-			N:               1,
-			Size:            "1024x1024",
-			Status:          image.StatusDispatched,
-			EstimatedCredit: cost,
+			TaskID:  taskID,
+			UserID:  ak.UserID,
+			KeyID:   ak.ID,
+			ModelID: m.ID,
+			Prompt:  prompt,
+			N:       1,
+			Size:    "1024x1024",
+			Status:  image.StatusDispatched,
 		})
 	}
 
@@ -495,16 +412,11 @@ func (h *ImagesHandler) handleChatAsImage(c *gin.Context, rec *usage.Log, ak *ap
 		return
 	}
 
-	if cost > 0 {
-		_ = h.Billing.Settle(context.Background(), ak.UserID, ak.ID, cost, cost, refID, "chat->image settle")
-	}
-	_ = h.Keys.DAO().TouchUsage(context.Background(), ak.ID, c.ClientIP(), cost)
+	_ = h.Keys.DAO().TouchUsage(context.Background(), ak.ID, c.ClientIP(), 0)
 	if h.DAO != nil {
-		_ = h.DAO.UpdateCost(c.Request.Context(), taskID, cost)
+		_ = h.DAO.UpdateCost(c.Request.Context(), taskID, 0)
 	}
-
 	rec.Status = usage.StatusSuccess
-	rec.CreditCost = cost
 	rec.DurationMs = int(time.Since(startAt).Milliseconds())
 	// chat-as-image 单轮固定 N=1,这里也按 SignedURLs 兜底,避免 0 张统计漂移。
 	rec.ImageCount = len(res.SignedURLs)
@@ -728,16 +640,7 @@ func (h *ImagesHandler) ImageEdits(c *gin.Context) {
 	}
 	rec.ModelID = m.ID
 
-	ratio := 1.0
 	rpmCap := ak.RPM
-	if h.Groups != nil {
-		if g, err := h.Groups.OfUser(c.Request.Context(), ak.UserID); err == nil && g != nil {
-			ratio = g.Ratio
-			if rpmCap == 0 {
-				rpmCap = g.RPMLimit
-			}
-		}
-	}
 	if h.Limiter != nil {
 		if ok, _, err := h.Limiter.AllowRPM(c.Request.Context(), ak.ID, rpmCap); err == nil && !ok {
 			fail("rate_limit_rpm")
@@ -747,43 +650,20 @@ func (h *ImagesHandler) ImageEdits(c *gin.Context) {
 		}
 	}
 
-	cost := billing.ComputeImageCost(m, n, ratio)
-	if cost > 0 {
-		if err := h.Billing.PreDeduct(c.Request.Context(), ak.UserID, ak.ID, cost, refID, "image-edit prepay"); err != nil {
-			if errors.Is(err, billing.ErrInsufficient) {
-				fail("insufficient_balance")
-				openAIError(c, http.StatusPaymentRequired, "insufficient_balance",
-					"积分不足,请前往「账单与充值」充值后再试")
-				return
-			}
-			fail("billing_error")
-			openAIError(c, http.StatusInternalServerError, "billing_error", "计费异常:"+err.Error())
-			return
-		}
-	}
-	refunded := false
-	refund := func(code string) {
-		fail(code)
-		if refunded || cost == 0 {
-			return
-		}
-		refunded = true
-		_ = h.Billing.Refund(context.Background(), ak.UserID, ak.ID, cost, refID, "image-edit refund")
-	}
+	refund := func(code string) { fail(code) }
 
 	taskID := image.GenerateTaskID()
 	if h.DAO != nil {
 		_ = h.DAO.Create(c.Request.Context(), &image.Task{
-			TaskID:          taskID,
-			UserID:          ak.UserID,
-			KeyID:           ak.ID,
-			ModelID:         m.ID,
-			Prompt:          prompt,
-			N:               n,
-			Size:            size,
-			Upscale:         upscale,
-			Status:          image.StatusDispatched,
-			EstimatedCredit: cost,
+			TaskID:  taskID,
+			UserID:  ak.UserID,
+			KeyID:   ak.ID,
+			ModelID: m.ID,
+			Prompt:  prompt,
+			N:       n,
+			Size:    size,
+			Upscale: upscale,
+			Status:  image.StatusDispatched,
 		})
 	}
 
@@ -814,15 +694,9 @@ func (h *ImagesHandler) ImageEdits(c *gin.Context) {
 		return
 	}
 
-	if cost > 0 {
-		if err := h.Billing.Settle(context.Background(), ak.UserID, ak.ID, cost, cost, refID, "image-edit settle"); err != nil {
-			logger.L().Error("billing settle image-edit", zap.Error(err), zap.String("ref", refID))
-		}
-	}
-	_ = h.Keys.DAO().TouchUsage(context.Background(), ak.ID, c.ClientIP(), cost)
+	_ = h.Keys.DAO().TouchUsage(context.Background(), ak.ID, c.ClientIP(), 0)
 
 	rec.Status = usage.StatusSuccess
-	rec.CreditCost = cost
 	rec.ImageCount = len(res.SignedURLs)
 	if rec.ImageCount <= 0 {
 		rec.ImageCount = n
@@ -831,7 +705,7 @@ func (h *ImagesHandler) ImageEdits(c *gin.Context) {
 		rec.ImageCount = 1
 	}
 	if h.DAO != nil {
-		_ = h.DAO.UpdateCost(c.Request.Context(), taskID, cost)
+		_ = h.DAO.UpdateCost(c.Request.Context(), taskID, 0)
 	}
 
 	out := ImageGenResponse{

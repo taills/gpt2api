@@ -64,3 +64,7 @@ export interface MenuResp {
 export function getMenu(): Promise<MenuResp> {
   return http.get('/api/me/menu')
 }
+
+export function fetchSiteInfo(): Promise<Record<string, string>> {
+  return http.get('/api/public/site-info')
+}

@@ -7,8 +7,6 @@ import (
 	"github.com/432539/gpt2api/internal/apikey"
 	"github.com/432539/gpt2api/internal/audit"
 	"github.com/432539/gpt2api/internal/auth"
-	"github.com/432539/gpt2api/internal/backup"
-	"github.com/432539/gpt2api/internal/channel"
 	"github.com/432539/gpt2api/internal/config"
 	"github.com/432539/gpt2api/internal/gateway"
 	"github.com/432539/gpt2api/internal/image"
@@ -16,7 +14,6 @@ import (
 	"github.com/432539/gpt2api/internal/model"
 	"github.com/432539/gpt2api/internal/proxy"
 	"github.com/432539/gpt2api/internal/rbac"
-	"github.com/432539/gpt2api/internal/recharge"
 	"github.com/432539/gpt2api/internal/settings"
 	"github.com/432539/gpt2api/internal/usage"
 	"github.com/432539/gpt2api/internal/user"
@@ -32,20 +29,17 @@ type Deps struct {
 	AuthH *auth.Handler
 	UserH *user.Handler
 
-	KeySvc     *apikey.Service
-	KeyH       *apikey.Handler
-	ProxyH     *proxy.Handler
-	AccountH   *account.Handler
-	ChannelH   *channel.Handler
+	KeySvc   *apikey.Service
+	KeyH     *apikey.Handler
+	ProxyH   *proxy.Handler
+	AccountH *account.Handler
 
 	GatewayH *gateway.Handler
 	ImagesH  *gateway.ImagesHandler
 
-	BackupH      *backup.Handler
-	AuditH       *audit.Handler
-	AuditDAO     *audit.DAO
-	AdminUserH   *user.AdminHandler
-	AdminGroupH  *user.AdminGroupHandler
+	AuditH     *audit.Handler
+	AuditDAO   *audit.DAO
+	AdminUserH *user.AdminHandler
 
 	AdminModelH *model.AdminHandler
 	AdminKeyH   *apikey.AdminHandler
@@ -56,9 +50,6 @@ type Deps struct {
 	MeImageH *image.MeHandler
 
 	AdminImageH *image.AdminHandler
-
-	RechargeH      *recharge.Handler
-	AdminRechargeH *recharge.AdminHandler
 
 	SettingsH *settings.Handler
 }
@@ -104,17 +95,6 @@ func New(d *Deps) *gin.Engine {
 				keys.DELETE("/:id", d.KeyH.Delete)
 			}
 
-			// 充值(自己的订单、下单、取消)
-			if d.RechargeH != nil {
-				rg := authed.Group("/recharge", middleware.RequirePerm(rbac.PermSelfRecharge))
-				{
-					rg.GET("/packages", d.RechargeH.ListPackages)
-					rg.POST("/orders", d.RechargeH.CreateOrder)
-					rg.GET("/orders", d.RechargeH.ListMyOrders)
-					rg.POST("/orders/:id/cancel", d.RechargeH.CancelOrder)
-				}
-			}
-
 			// 生成面板:当前用户的用量明细(文字 token) + 图片任务历史
 			if d.MeUsageH != nil {
 				ug := authed.Group("/me/usage", middleware.RequirePerm(rbac.PermSelfUsage))
@@ -123,10 +103,8 @@ func New(d *Deps) *gin.Engine {
 					ug.GET("/stats", d.MeUsageH.Stats)
 				}
 			}
-			// 当前用户的积分流水(只读)
-			authed.GET("/me/credit-logs",
-				middleware.RequirePerm(rbac.PermSelfUsage), d.UserH.CreditLogs)
-			if d.MeImageH != nil {
+			// 当前用户的用量明细(credit-logs 已移除)
+		if d.MeImageH != nil {
 				ig := authed.Group("/me/images", middleware.RequirePerm(rbac.PermSelfImage))
 				{
 					ig.GET("/tasks", d.MeImageH.List)
@@ -155,10 +133,6 @@ func New(d *Deps) *gin.Engine {
 		pub := api.Group("/public")
 		if d.SettingsH != nil {
 			pub.GET("/site-info", d.SettingsH.Public)
-		}
-		if d.RechargeH != nil {
-			pub.POST("/epay/notify", d.RechargeH.EPayNotify)
-			pub.GET("/epay/notify", d.RechargeH.EPayNotify)
 		}
 
 		// admin 全组强制 RequireAdmin;所有写操作再通过 audit.Middleware 自动落审计。
@@ -220,30 +194,6 @@ func New(d *Deps) *gin.Engine {
 					ug.POST("/:id/reset-password",
 						middleware.RequirePerm(rbac.PermUserWrite), d.AdminUserH.ResetPassword)
 					ug.DELETE("/:id", middleware.RequirePerm(rbac.PermUserWrite), d.AdminUserH.Delete)
-					// 积分调账
-					ug.POST("/:id/credits/adjust",
-						middleware.RequirePerm(rbac.PermUserCredit), d.AdminUserH.Adjust)
-					ug.GET("/:id/credit-logs",
-						middleware.RequirePerm(rbac.PermUsageReadAll), d.AdminUserH.CreditLogs)
-				}
-
-				// ---- 积分管理(全局视图) ----
-				cg := admin.Group("/credits", middleware.RequirePerm(rbac.PermUserCredit))
-				{
-					cg.GET("/summary", d.AdminUserH.CreditsSummary)
-					cg.GET("/logs", d.AdminUserH.CreditLogsGlobal)
-					cg.POST("/adjust", d.AdminUserH.AdjustByUser)
-				}
-			}
-
-			// ---- 用户分组 ----
-			if d.AdminGroupH != nil {
-				gg := admin.Group("/groups", middleware.RequirePerm(rbac.PermGroupWrite))
-				{
-					gg.GET("", d.AdminGroupH.List)
-					gg.POST("", d.AdminGroupH.Create)
-					gg.PUT("/:id", d.AdminGroupH.Update)
-					gg.DELETE("/:id", d.AdminGroupH.Delete)
 				}
 			}
 
@@ -256,32 +206,6 @@ func New(d *Deps) *gin.Engine {
 			// 生成记录(管理员全局视图)
 			if d.AdminImageH != nil {
 				admin.GET("/image-tasks", middleware.RequirePerm(rbac.PermUsageReadAll), d.AdminImageH.List)
-			}
-
-			// ---- 上游渠道(OpenAI/Gemini 兼容) ----
-			if d.ChannelH != nil {
-				cg := admin.Group("/channels",
-					middleware.RequirePerm(rbac.PermChannelRead, rbac.PermChannelWrite))
-				{
-					cg.GET("", d.ChannelH.List)
-					cg.POST("", middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.Create)
-					cg.GET("/:id", d.ChannelH.Get)
-					cg.PATCH("/:id", middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.Update)
-					cg.DELETE("/:id", middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.Delete)
-					cg.POST("/:id/test", middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.Test)
-					cg.GET("/:id/mappings", d.ChannelH.ListMappings)
-					cg.POST("/:id/mappings",
-						middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.CreateMapping)
-				}
-				// 映射单条操作:另起一组,避免和 /channels/:id 冲突。
-				mg := admin.Group("/channel-mappings",
-					middleware.RequirePerm(rbac.PermChannelRead, rbac.PermChannelWrite))
-				{
-					mg.PATCH("/:mid",
-						middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.UpdateMapping)
-					mg.DELETE("/:mid",
-						middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.DeleteMapping)
-				}
 			}
 
 			// ---- 模型配置 ----
@@ -324,19 +248,6 @@ func New(d *Deps) *gin.Engine {
 				}
 			}
 
-			// ---- 充值套餐 + 订单 ----
-			if d.AdminRechargeH != nil {
-				rg := admin.Group("/recharge", middleware.RequirePerm(rbac.PermRechargeManage))
-				{
-					rg.GET("/packages", d.AdminRechargeH.ListPackages)
-					rg.POST("/packages", d.AdminRechargeH.CreatePackage)
-					rg.PATCH("/packages/:id", d.AdminRechargeH.UpdatePackage)
-					rg.DELETE("/packages/:id", d.AdminRechargeH.DeletePackage)
-					rg.GET("/orders", d.AdminRechargeH.ListOrders)
-					rg.POST("/orders/:id/force-paid", d.AdminRechargeH.ForcePaid)
-				}
-			}
-
 			// 系统设置(站点 / 注册 / SMTP 测试 等)
 			if d.SettingsH != nil {
 				sg := admin.Group("/settings", middleware.RequirePerm(rbac.PermSystemSetting))
@@ -345,19 +256,6 @@ func New(d *Deps) *gin.Engine {
 					sg.PUT("", d.SettingsH.Update)
 					sg.POST("/reload", d.SettingsH.Reload)
 					sg.POST("/test-email", d.SettingsH.TestMail)
-				}
-			}
-
-			// 数据库备份/恢复(超高危,细粒度权限 + handler 内二次密码)
-			if d.BackupH != nil {
-				bg := admin.Group("/system/backup", middleware.RequirePerm(rbac.PermSystemBackup))
-				{
-					bg.GET("", d.BackupH.List)
-					bg.POST("", d.BackupH.Create)
-					bg.GET("/:id/download", d.BackupH.Download)
-					bg.DELETE("/:id", d.BackupH.Delete)
-					bg.POST("/:id/restore", d.BackupH.Restore)
-					bg.POST("/upload", d.BackupH.Upload)
 				}
 			}
 		}

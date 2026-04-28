@@ -28,17 +28,15 @@ type Permission string
 
 const (
 	// --- 普通用户(self) ---
-	PermSelfProfile = Permission("self:profile")       // 看/改自己资料
-	PermSelfKey     = Permission("self:key")           // 管自己 API Key
-	PermSelfUsage   = Permission("self:usage")         // 查自己 usage/账单
-	PermSelfRecharge = Permission("self:recharge")     // 充值/查自己订单
-	PermSelfImage    = Permission("self:image")        // 自己生图任务
+	PermSelfProfile = Permission("self:profile") // 看/改自己资料
+	PermSelfKey     = Permission("self:key")     // 管自己 API Key
+	PermSelfUsage   = Permission("self:usage")   // 查自己 usage/账单
+	PermSelfImage   = Permission("self:image")   // 自己生图任务
 
 	// --- 管理员(admin) ---
 	// 用户管理
-	PermUserRead   = Permission("user:read")
-	PermUserWrite  = Permission("user:write")  // 创建/编辑/禁用/重置密码
-	PermUserCredit = Permission("user:credit") // 调整积分(高危)
+	PermUserRead  = Permission("user:read")
+	PermUserWrite = Permission("user:write") // 创建/编辑/禁用/重置密码
 
 	// API Key(跨用户)
 	PermKeyReadAll  = Permission("key:read_all")
@@ -52,14 +50,6 @@ const (
 	PermModelRead    = Permission("model:read")
 	PermModelWrite   = Permission("model:write")
 
-	// 上游渠道(OpenAI/Gemini 等外置供应商) + 模型映射
-	PermChannelRead  = Permission("channel:read")
-	PermChannelWrite = Permission("channel:write")
-
-	// 分组 / 计费
-	PermGroupWrite     = Permission("group:write")
-	PermRechargeManage = Permission("recharge:manage")
-
 	// 统计 / 审计
 	PermUsageReadAll = Permission("usage:read_all")
 	PermStatsReadAll = Permission("stats:read_all")
@@ -67,7 +57,6 @@ const (
 
 	// 系统
 	PermSystemSetting = Permission("system:setting") // 改系统配置
-	PermSystemBackup  = Permission("system:backup")  // 数据库备份/恢复(超高危)
 )
 
 // rolePermissions 是角色到权限集合的静态映射。
@@ -77,22 +66,19 @@ var rolePermissions = map[string][]Permission{
 		PermSelfProfile,
 		PermSelfKey,
 		PermSelfUsage,
-		PermSelfRecharge,
 		PermSelfImage,
 	},
 	RoleAdmin: {
 		// admin 继承 user 所有 self 权限(admin 自己也有 api key 等)
-		PermSelfProfile, PermSelfKey, PermSelfUsage, PermSelfRecharge, PermSelfImage,
+		PermSelfProfile, PermSelfKey, PermSelfUsage, PermSelfImage,
 
-		PermUserRead, PermUserWrite, PermUserCredit,
+		PermUserRead, PermUserWrite,
 		PermKeyReadAll, PermKeyWriteAll,
 		PermAccountRead, PermAccountWrite,
 		PermProxyRead, PermProxyWrite,
 		PermModelRead, PermModelWrite,
-		PermChannelRead, PermChannelWrite,
-		PermGroupWrite, PermRechargeManage,
 		PermUsageReadAll, PermStatsReadAll, PermAuditRead,
-		PermSystemSetting, PermSystemBackup,
+		PermSystemSetting,
 	},
 }
 

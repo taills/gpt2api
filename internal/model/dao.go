@@ -112,9 +112,9 @@ func (d *DAO) SetEnabled(ctx context.Context, id uint64, enabled bool) error {
 func (d *DAO) SoftDelete(ctx context.Context, id uint64) error {
 	res, err := d.db.ExecContext(ctx, `
 UPDATE models
-   SET deleted_at = NOW(),
+   SET deleted_at = CURRENT_TIMESTAMP,
        enabled    = 0,
-       slug       = CONCAT(slug, '#del', id)
+       slug       = slug || '#del' || CAST(id AS TEXT)
  WHERE id = ? AND deleted_at IS NULL`, id)
 	if err != nil {
 		return err
@@ -126,14 +126,3 @@ UPDATE models
 	return nil
 }
 
-// GroupRatio 返回指定 model + group 的有效倍率(没有覆盖则返回 1.0)。
-func (d *DAO) GroupRatio(ctx context.Context, modelID, groupID uint64) (float64, error) {
-	var r float64
-	err := d.db.GetContext(ctx, &r,
-		`SELECT ratio FROM billing_ratios WHERE model_id = ? AND group_id = ?`,
-		modelID, groupID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 1.0, nil
-	}
-	return r, err
-}

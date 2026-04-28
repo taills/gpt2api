@@ -47,7 +47,7 @@ async function onSubmit() {
     await store.register(form.email, form.password, form.nickname)
     ElMessage.success('注册成功,正在登录…')
     await store.login(form.email, form.password)
-    router.replace('/personal/dashboard')
+    router.replace('/personal/play')
   } catch {
     // toast 由拦截器处理
   } finally {

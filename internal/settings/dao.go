@@ -22,7 +22,7 @@ type row struct {
 // LoadAll 全量读。启动时以及 Set 后无需调用(Set 内部维护)。
 func (d *DAO) LoadAll(ctx context.Context) (map[string]string, error) {
 	var rows []row
-	if err := d.db.SelectContext(ctx, &rows, "SELECT `k`, COALESCE(`v`, '') AS `v` FROM `system_settings`"); err != nil {
+	if err := d.db.SelectContext(ctx, &rows, "SELECT k, COALESCE(v, '') AS v FROM system_settings"); err != nil {
 		return nil, err
 	}
 	m := make(map[string]string, len(rows))
@@ -44,8 +44,8 @@ func (d *DAO) SetMany(ctx context.Context, kv map[string]string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	const q = "INSERT INTO `system_settings` (`k`, `v`) VALUES (?, ?) " +
-		"ON DUPLICATE KEY UPDATE `v` = VALUES(`v`)"
+	const q = "INSERT INTO system_settings (k, v) VALUES (?, ?) " +
+		"ON CONFLICT(k) DO UPDATE SET v = excluded.v"
 	for k, v := range kv {
 		k = strings.TrimSpace(k)
 		if k == "" {
