@@ -33,6 +33,7 @@ type Runner struct {
 	sched     *scheduler.Scheduler
 	dao       *DAO
 	quotaDecr QuotaDecrementor // 生图成功后立即扣减账号额度(可空,空时跳过)
+	cacheDir  string           // 本地图片缓存根目录;空字符串表示不缓存
 }
 
 // NewRunner 构造 Runner。
@@ -42,6 +43,9 @@ func NewRunner(sched *scheduler.Scheduler, dao *DAO) *Runner {
 
 // SetQuotaDecrementor 注入额度扣减器。
 func (r *Runner) SetQuotaDecrementor(qd QuotaDecrementor) { r.quotaDecr = qd }
+
+// SetCacheDir 设置本地图片缓存目录。
+func (r *Runner) SetCacheDir(dir string) { r.cacheDir = dir }
 
 // ReferenceImage 是图生图/编辑的一张参考图输入。
 // 只需要提供原始字节 + 可选的文件名,Runner 会在运行时调用 chatgpt Client 上传。
@@ -56,7 +60,7 @@ type RunOptions struct {
 	UserID            uint64
 	KeyID             uint64
 	ModelID           uint64
-	UpstreamModel     string           // 默认 "auto"(由上游根据 system_hints 挑选图像模型)
+	UpstreamModel     string // 默认 "auto"(由上游根据 system_hints 挑选图像模型)
 	Prompt            string
 	N                 int              // 期望返回的图片张数;够数 Poll 就立即返回(速度优先)
 	MaxAttempts       int              // 跨账号重试次数,仅用于无账号/限流等硬错误,默认 1
@@ -67,7 +71,7 @@ type RunOptions struct {
 
 // RunResult 是单次生图的输出。
 type RunResult struct {
-	Status         string   // success / failed
+	Status         string // success / failed
 	ConversationID string
 	AccountID      uint64
 	FileIDs        []string // chatgpt.com 侧的原始 ref("sed:" 前缀表示 sediment)
@@ -165,11 +169,49 @@ func (r *Runner) Run(ctx context.Context, opt RunOptions) *RunResult {
 				}
 				_ = r.quotaDecr.DecrQuota(context.Background(), result.AccountID, n)
 			}
+			// 异步预热本地图片缓存:把签名 URL 对应的图片字节下载并落盘,
+			// 这样后续 /p/img 请求可以直接从磁盘返回,无需再走上游。
+			r.eagerCacheImages(result.SignedURLs, result.ContentTypes)
 		} else {
 			_ = r.dao.MarkFailed(ctx, opt.TaskID, result.ErrorCode)
 		}
 	}
 	return result
+}
+
+// eagerCacheImages 异步下载签名 URL 并写入本地磁盘缓存。
+// 失败时只打 warn 日志,不影响主流程。
+func (r *Runner) eagerCacheImages(signedURLs, contentTypes []string) {
+	if r.cacheDir == "" || len(signedURLs) == 0 {
+		return
+	}
+	urls := make([]string, len(signedURLs))
+	copy(urls, signedURLs)
+	cts := make([]string, len(contentTypes))
+	copy(cts, contentTypes)
+	dir := r.cacheDir
+	go func() {
+		for i, u := range urls {
+			if ImageCacheExists(dir, u) {
+				continue
+			}
+			ct := "image/png"
+			if i < len(cts) && cts[i] != "" {
+				ct = cts[i]
+			}
+			data, fetchCT, err := fetchImageHTTP(u)
+			if err != nil {
+				logger.L().Warn("eager cache fetch failed", zap.String("url", u), zap.Error(err))
+				continue
+			}
+			if fetchCT != "" {
+				ct = fetchCT
+			}
+			if err := WriteImageCache(dir, u, data, ct); err != nil {
+				logger.L().Warn("eager cache write failed", zap.String("url", u), zap.Error(err))
+			}
+		}
+	}()
 }
 
 // runParallel 并发启动 opt.N 个独立请求,每个各出 1 张图,最终合并到 result。
@@ -226,9 +268,9 @@ func (r *Runner) runParallel(ctx context.Context, opt RunOptions, start time.Tim
 	go func() { wg.Wait(); close(ch) }()
 
 	var (
-		successCount  int
-		lastErrCode   string
-		lastErrMsg    string
+		successCount int
+		lastErrCode  string
+		lastErrMsg   string
 	)
 	for sr := range ch {
 		if sr.ok {

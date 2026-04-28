@@ -159,6 +159,31 @@ func (h *ImagesHandler) ImageProxy(c *gin.Context) {
 		return
 	}
 	ref := fids[idx] // 可能是 "sed:xxxx" 或 "xxxx"
+
+	// ── 本地磁盘缓存命中?
+	// 原图  key = result_urls[idx]
+	// 缩略图 key = result_urls[idx] + ":thumb_kb:N"
+	if h.CacheDir != "" {
+		resultURLs := t.DecodeResultURLs()
+		if idx < len(resultURLs) {
+			var diskKey string
+			if thumbKB > 0 {
+				diskKey = resultURLs[idx] + ":thumb_kb:" + strconv.Itoa(thumbKB)
+			} else {
+				diskKey = resultURLs[idx]
+			}
+			if data, ctCache, ok := image.ReadImageCache(h.CacheDir, diskKey); ok {
+				c.Header("Cache-Control", "private, max-age=86400")
+				c.Header("X-Cache", "HIT")
+				if thumbKB > 0 {
+					c.Header("X-Thumb-KB", strconv.Itoa(thumbKB))
+				}
+				c.Data(http.StatusOK, ctCache, data)
+				return
+			}
+		}
+	}
+
 	if t.AccountID == 0 || h.ImageAccResolver == nil {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
@@ -227,9 +252,30 @@ func (h *ImagesHandler) ImageProxy(c *gin.Context) {
 		ct = "image/png"
 	}
 
+	// 异步写入本地磁盘缓存(仅非缩略图路径)。
+	if h.CacheDir != "" && thumbKB == 0 {
+		resultURLs := t.DecodeResultURLs()
+		if idx < len(resultURLs) {
+			rawURL := resultURLs[idx]
+			cacheDir := h.CacheDir
+			cacheData := body
+			cacheCT := ct
+			go func() { _ = image.WriteImageCache(cacheDir, rawURL, cacheData, cacheCT) }()
+		}
+	}
+
 	// 缩略图分支:直接压缩原字节,不进 upscale 缓存;失败时回落原图。
 	if thumbKB > 0 {
 		if data, ctThumb, ok := image.MakeThumbnail(body, thumbKB); ok {
+			// 异步写入缩略图磁盘缓存
+			if h.CacheDir != "" {
+				resultURLs := t.DecodeResultURLs()
+				if idx < len(resultURLs) {
+					thumbKey := resultURLs[idx] + ":thumb_kb:" + strconv.Itoa(thumbKB)
+					cacheDir, cacheData, cacheCT := h.CacheDir, data, ctThumb
+					go func() { _ = image.WriteImageCache(cacheDir, thumbKey, cacheData, cacheCT) }()
+				}
+			}
 			c.Header("Cache-Control", "private, max-age=86400")
 			c.Header("X-Thumb-KB", strconv.Itoa(thumbKB))
 			c.Data(http.StatusOK, ctThumb, data)

@@ -56,6 +56,8 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'GPT账号', perm: 'account:read' } },
       { path: 'image-tasks', component: () => import('@/views/admin/ImageTasks.vue'),
         meta: { title: '生成记录', perm: 'usage:read_all' } },
+      { path: 'proxies', component: () => import('@/views/admin/Proxies.vue'),
+        meta: { title: '代理池', perm: 'proxy:read' } },
     ],
   },
   {
