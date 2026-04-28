@@ -280,7 +280,7 @@ func (d *QueryDAO) Daily(ctx context.Context, f Filter, days int) ([]DailyPoint,
 	where, args := d.buildWhere(f)
 
 	q := fmt.Sprintf(`
-SELECT strftime('%%Y-%%m-%%d', u.created_at)               AS day,
+SELECT COALESCE(strftime('%%Y-%%m-%%d', u.created_at), '')  AS day,
        COUNT(*)                                            AS requests,
        COALESCE(SUM(CASE WHEN u.status='failed' THEN 1 ELSE 0 END), 0) AS failures,
        COALESCE(SUM(u.input_tokens),  0)                   AS input_tokens,
