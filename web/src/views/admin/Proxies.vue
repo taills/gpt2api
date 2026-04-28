@@ -35,7 +35,7 @@
         <template #default="{ row }">
           <el-switch
             :model-value="row.enabled"
-            @change="(v: boolean) => toggleEnabled(row, v)"
+            @change="(v: string | number | boolean) => toggleEnabled(row, v as boolean)"
           />
         </template>
       </el-table-column>
@@ -55,7 +55,7 @@
       <el-table-column label="创建时间" width="160">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
           <el-button

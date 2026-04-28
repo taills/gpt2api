@@ -36,6 +36,8 @@ var menuTree = []Menu{
 		Children: []Menu{
 			{Key: "admin.accounts", Title: "GPT账号", Icon: "Connection", Path: "/admin/accounts",
 				Perms: []Permission{PermAccountRead}},
+			{Key: "admin.proxies", Title: "代理池", Icon: "Share", Path: "/admin/proxies",
+				Perms: []Permission{PermProxyRead}},
 			{Key: "admin.image-tasks", Title: "生成记录", Icon: "Picture", Path: "/admin/image-tasks",
 				Perms: []Permission{PermUsageReadAll}},
 		},
