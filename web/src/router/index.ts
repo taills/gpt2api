@@ -40,6 +40,8 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '在线体验', perm: ['self:image', 'self:usage'] } },
       { path: 'docs', component: () => import('@/views/personal/ApiDocs.vue'),
         meta: { title: '接口文档', perm: ['self:usage', 'self:image'] } },
+      { path: 'keys', component: () => import('@/views/personal/ApiKeys.vue'),
+        meta: { title: 'API Keys', perm: 'self:key' } },
       // 旧路径兼容
       { path: 'playground', redirect: '/personal/docs' },
       { path: 'images', redirect: '/personal/play' },

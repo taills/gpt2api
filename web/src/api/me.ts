@@ -334,3 +334,64 @@ export async function playEditImage(
   }
   return (await resp.json()) as PlayImageResponse
 }
+
+// ===============================================================
+// 当前用户 API Key 管理 (/api/keys)
+// ===============================================================
+
+export interface ApiKey {
+  id: number
+  user_id: number
+  name: string
+  key_prefix: string
+  quota_limit: number
+  quota_used: number
+  rpm: number
+  tpm: number
+  expires_at?: { Valid: boolean; Time: string } | null
+  last_used_at?: { Valid: boolean; Time: string } | null
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface GeneratedKey {
+  key: string
+  record: ApiKey
+}
+
+export interface CreateKeyInput {
+  name: string
+  quota_limit?: number
+  rpm?: number
+  tpm?: number
+}
+
+export interface UpdateKeyInput {
+  name?: string
+  quota_limit?: number
+  rpm?: number
+  tpm?: number
+  enabled?: boolean
+}
+
+export function listMyKeys(params: { page?: number; page_size?: number } = {}): Promise<{
+  list: ApiKey[]
+  total: number
+  page: number
+  page_size: number
+}> {
+  return http.get('/api/keys', { params })
+}
+
+export function createMyKey(data: CreateKeyInput): Promise<GeneratedKey> {
+  return http.post('/api/keys', data)
+}
+
+export function updateMyKey(id: number, data: UpdateKeyInput): Promise<ApiKey> {
+  return http.patch(`/api/keys/${id}`, data)
+}
+
+export function deleteMyKey(id: number): Promise<{ deleted: number }> {
+  return http.delete(`/api/keys/${id}`)
+}

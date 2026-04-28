@@ -25,6 +25,8 @@ var menuTree = []Menu{
 				Perms: []Permission{PermSelfImage, PermSelfUsage}},
 			{Key: "personal.docs", Title: "接口文档", Icon: "Document", Path: "/personal/docs",
 				Perms: []Permission{PermSelfUsage, PermSelfImage}},
+			{Key: "personal.keys", Title: "API Keys", Icon: "Key", Path: "/personal/keys",
+				Perms: []Permission{PermSelfKey}},
 		},
 	},
 	// ---- 管理员区 ----
