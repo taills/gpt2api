@@ -1,6 +1,6 @@
 # gpt2api
 
-> 基于逆向 **chatgpt.com** 的 OpenAI 兼容 SaaS 网关 —— 多账号池 / 代理池 / **IMG2 终稿直出** / **批量出图** / **本地 2K/4K 高清放大** / **高并发调度** / 积分计费 / 管理后台一体化。
+> 基于逆向 **chatgpt.com** 的 OpenAI 兼容 SaaS 网关 —— 多账号池 / 代理池 / **IMG2 终稿直出** / **批量出图** / **本地 2K/4K 高清放大** / **本地磁盘图片缓存** / **高并发调度** / 积分计费 / 管理后台一体化。
 
 <p align="center">
   <a href="https://github.com/432539/gpt2api/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/432539/gpt2api?style=flat-square"></a>
@@ -30,6 +30,7 @@
   - [8.2 4K / 2K 高清输出(本地 Catmull-Rom 放大)](#82-4k--2k-高清输出本地-catmull-rom-放大)
   - [8.3 批量出图 / 多张聚合](#83-批量出图--多张聚合)
   - [8.4 高性能高并发调度](#84-高性能高并发调度)
+  - [8.5 本地磁盘图片缓存](#85-本地磁盘图片缓存)
 - [九、管理后台功能概览](#九管理后台功能概览)
 - [十、目录结构](#十目录结构)
 - [十一、二次开发 / 定制](#十一二次开发--定制)
@@ -86,14 +87,15 @@
 |------|------|
 | **上游协议** | 完整逆向 `chatgpt.com` `f/conversation` 两步 sentinel(`/prepare` + `/finalize`)、PoW、`conduit_token`、全套 `oai-*` / `Sec-Ch-Ua-*` 指纹头 |
 | **图片生成** | 文生图、**图生图 / 多图参考**、**IMG2 正式版直出**(速度优先,SSE 够数即返回,最长 300s 补齐轮询兜底)、**本地 2K/4K PNG 高清放大**(Catmull-Rom 插值,按需触发 + 进程内 LRU)、轮询 + SSE 直出双通道 |
+| **本地磁盘缓存** | 生成完成后自动预热 `data/YYYYMMDD/<md5>` 磁盘缓存;代理请求优先命中本地磁盘,避免重复拉取 CDN;缩略图(`?thumb_kb=N`)独立缓存键 `rawURL:thumb_kb:N`,命中时响应头 `X-Cache: HIT` |
 | **账号池** | JSON / AT / RT / ST 四种方式批量导入,**自动刷新**、**额度探测**、**风控熔断**、按账号稳定绑定 `oai-device-id` / `oai-session-id` |
-| **代理池** | 支持 HTTP / SOCKS5,健康分自动探测,按账号强绑定代理,避免 IP 指纹混用 |
-| **调度器** | 串行 lease + Redis 分布式锁,`min_interval_sec` 单号最小间隔、`daily_usage_ratio` 日熔断、`cooldown_429_sec` 限速退避 |
+| **代理池** | 支持 HTTP / SOCKS5,健康分彩色标签(≥71 绿 / 41-70 黄 / ≤40 红)自动探测,单条/全量探测,批量导入,按账号强绑定代理,避免 IP 指纹混用 |
+| **调度器** | 串行 lease + 内存锁(MemoryLock),`min_interval_sec` 单号最小间隔、`daily_usage_ratio` 日熔断、`cooldown_429_sec` 限速退避 |
 | **OpenAI 兼容** | `/v1/chat/completions`(保留)、`/v1/images/generations`、`/v1/images/edits`、`/v1/images/tasks/:id`、`/v1/models` |
 | **下游 Key** | 独立于用户账号的 `sk-` Key,支持 **RPM / TPM / 日配额 / IP 白名单 / 模型白名单** |
 | **计费** | 积分钱包 + 预扣结算、分组倍率(VIP / 内部 / 渠道)、充值套餐、**易支付(EPay)**接入 |
 | **安全** | AES-256-GCM 加密 AT / cookies、JWT 登录、RBAC 权限、**管理员写操作全链路审计**、高危操作 `X-Admin-Confirm` 二次确认 |
-| **运维** | 数据库一键备份 / 恢复(`mysqldump` + gzip)、上传单文件限额、备份保留策略 |
+| **运维** | SQLite 数据库一键备份 / 恢复(gzip)、上传单文件限额、备份保留策略 |
 | **图片防盗链** | 内置签名代理 `/p/img/:task/:idx`,HMAC 签名 + 过期时间,绕过 `chatgpt.com` `estuary/content` 的 403 |
 | **前端** | Vue 3 + Element Plus 单页控制台,账户池 / 代理池 / 模型 / 用户 / 积分 / 审计 / 备份 / 系统设置全覆盖 |
 
@@ -104,8 +106,9 @@
 **后端**
 
 - Go 1.22+
-- Gin(HTTP 框架) / sqlx(MySQL 访问) / Viper(配置) / Zap(日志)
-- MySQL 8.0(业务数据 + 审计 + 账变) / Redis 7(分布式锁 / 限流 / 缓存)
+- Gin(HTTP 框架) / sqlx(SQLite 访问) / Viper(配置) / Zap(日志)
+- **SQLite 3**(CGO-free,`modernc.org/sqlite`,WAL 模式,单文件 `data/gpt2api.db`,无需额外服务)
+- 内存锁(MemoryLock,单进程并发安全) / 内存令牌桶(MemoryBucket,RPM/TPM 限流)
 - `refraction-networking/utls`(TLS 指纹,用于规避 `chatgpt.com` JA3 检测)
 - `golang-jwt/jwt` / `golang.org/x/crypto`(鉴权 + 密码学)
 - Goose(数据库迁移)
@@ -120,8 +123,9 @@
 
 **部署**
 
-- Docker Compose(MySQL + Redis + server,可选 nginx)
-- 默认单机;水平扩展见 [`deploy/README.md`](deploy/README.md)
+- Docker Compose(**单容器**,无需 MySQL / Redis,数据全部存储在 `/app/data/gpt2api.db`)
+- 默认单机部署,SQLite WAL 模式支持高并发读;写串行由进程内 mutex 保护
+- 水平扩展见 [`deploy/README.md`](deploy/README.md)
 
 ---
 
@@ -138,9 +142,10 @@ flowchart LR
     API["Gin Router<br/>/v1/* · /api/*"]
     Auth["APIKey / JWT<br/>RPM · TPM · IP 白名单"]
     Billing["积分预扣<br/>分组倍率"]
-    Scheduler["账号调度器<br/>Redis 锁 · lease · 熔断"]
+    Scheduler["账号调度器<br/>内存锁 · lease · 熔断"]
     Upstream["ChatGPT Client<br/>utls · sentinel v2 · 多 header 指纹"]
-    ImgProxy["图片签名代理<br/>/p/img/:id/:n"]
+    ImgProxy["图片签名代理<br/>/p/img/:id/:n<br/>磁盘缓存命中优先"]
+    DiskCache["本地磁盘缓存<br/>data/YYYYMMDD/<md5><br/>原图 + 缩略图"]
   end
 
   subgraph Pool["资源池"]
@@ -150,8 +155,7 @@ flowchart LR
   end
 
   subgraph Storage["持久化"]
-    MySQL[(MySQL 8.0<br/>用户 · 账号 · 账变 · 审计)]
-    Redis[(Redis 7<br/>分布式锁 · 限流)]
+    SQLite[(SQLite<br/>data/gpt2api.db<br/>用户 · 账号 · 账变 · 审计)]
   end
 
   subgraph UpstreamAPI["chatgpt.com"]
@@ -170,20 +174,20 @@ flowchart LR
   Upstream --> FConv
   Upstream --> Estuary
   Estuary -. "fid / sid" .-> ImgProxy
+  ImgProxy <--> DiskCache
   ImgProxy --> SDK
-  Gateway <--> MySQL
-  Gateway <--> Redis
+  Gateway <--> SQLite
 ```
 
 **数据流(一次文生图调用)**:
 
 1. 下游 `POST /v1/images/generations` 携带 `Authorization: Bearer sk-xxx`;
-2. Gateway 校验 Key → 查下游限流(RPM/TPM/日配额)→ 预扣积分;
-3. Scheduler 从账号池挑一个 `idle` 且满足 `min_interval_sec` 的账号,拿 Redis 锁建立 lease;
+2. Gateway 校验 Key → 查下游限流(RPM/TPM/日配额,内存令牌桶)→ 预扣积分;
+3. Scheduler 从账号池挑一个 `idle` 且满足 `min_interval_sec` 的账号,拿内存锁建立 lease;
 4. 通过账号绑定的代理,走 `utls` TLS 指纹,按真实 Edge 143 浏览器的 header/payload 访问 `chatgpt.com`;
 5. 两步 sentinel 换 chat-requirements token → `/f/conversation/prepare` 拿 `conduit_token` → SSE 上游生图;
 6. 解析 tool message 拿 `fids` / `sids`,够 N 张立即短路下载,不够再短轮询最多 300s 补齐;
-7. 所有图片 URL 经 HMAC 签名,返回 `https://<your-domain>/p/img/<task>/<idx>?exp=…&sig=…`;
+7. 所有图片 URL 经 HMAC 签名,返回 `https://<your-domain>/p/img/<task>/<idx>?exp=…&sig=…`;生成完成后后台自动将原图预热写入本地磁盘缓存;
 8. 扣费结算 + 写 usage_logs + 释放 lease + 更新账号状态。
 
 ---
@@ -202,7 +206,7 @@ flowchart LR
 | **Go** | 1.22+ | 交叉编译 `gpt2api` + `goose` 二进制 |
 | **Node.js** | 18+(推荐 20 LTS)| 编译前端 Vite 产物 |
 | **Docker** | 24+ | 构建 + 运行镜像 |
-| **docker compose** | v2 插件 | 启动 mysql / redis / server 编排 |
+| **docker compose** | v2 插件 | 启动单容器编排(无需 MySQL / Redis) |
 | **git** | 任意 | 克隆仓库 |
 
 > Windows 用户装 Go + Node + Docker Desktop 即可;Linux 服务器一条 `apt install -y golang-go nodejs npm docker.io docker-compose-plugin` 基本够用。  
@@ -266,13 +270,11 @@ cd deploy
 cp .env.example .env
 ```
 
-**必改** `.env` 中的三项:
+**必改** `.env` 中的两项:
 
 ```env
 JWT_SECRET=请改成 >=32 位随机串
 CRYPTO_AES_KEY=请改成严格 64 位 hex(32 字节 AES-256)
-MYSQL_ROOT_PASSWORD=你自己的强密码
-MYSQL_PASSWORD=你自己的强密码
 ```
 
 生成两个随机值的快捷命令:
@@ -292,9 +294,10 @@ docker compose logs -f server
 
 启动过程里 `server` 会自动:
 
-1. 等 `mysql` 健康;
-2. 跑 `goose up` 应用全部迁移(用户 / 账号 / 审计 / 备份元数据等十余张表);
-3. 启动 HTTP 服务 `:8080`。
+1. 跑 `goose up` 应用全部迁移(用户 / 账号 / 审计 / 备份元数据等十余张表,写入 `data/gpt2api.db`);
+2. 启动 HTTP 服务 `:8080`。
+
+> ✅ **无需单独启动 MySQL / Redis** — 本项目使用嵌入式 SQLite,所有业务数据持久化到 `data/gpt2api.db`(通过 Docker volume 挂载持久化),图片缓存写入 `data/YYYYMMDD/` 目录。
 
 > ### ⚠️ 没有默认账号 / 密码 —— 首位注册者自动成为管理员
 >
@@ -342,8 +345,7 @@ docker compose logs -f server
 | 段落 | 关键字段 | 说明 |
 |------|---------|------|
 | `app` | `listen`, `base_url` | HTTP 监听地址 / 对外 base URL(签名图片代理用) |
-| `mysql` | `dsn`, `max_open_conns` | MySQL 连接,生产推荐 500 + |
-| `redis` | `addr`, `pool_size` | Redis,生产推荐 pool=500(锁 / 限流 / 令牌桶) |
+| `sqlite` | `path` | SQLite 数据库文件路径,默认 `data/gpt2api.db`,Docker 中通过 volume 持久化 |
 | `jwt` | `secret`, `*_ttl_sec` | **生产必须覆盖** `secret` |
 | `crypto` | `aes_key` | **生产必须覆盖**,32 字节 hex,用于加密账号 AT / cookies |
 | `scheduler` | `min_interval_sec` | **单账号最小间隔秒**,对抗风控核心参数 |
@@ -586,7 +588,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=32) as ex:
 |------|---------|------|
 | 图片生成(IMG2,账号池 100+) | `min_interval_sec=60` | **单机 >= 1000 并发图**(受账号池规模线性缩放) |
 | 文字 SSE(沉睡中,见第一节) | `min_interval_sec=30` | 单机 >= 2000 并发 SSE |
-| 下游 RPM/TPM 限流 | Redis 令牌桶 | 单 Key 5000 RPM 无压力 |
+| 下游 RPM/TPM 限流 | 内存令牌桶(MemoryBucket) | 单 Key 5000 RPM 无压力 |
 
 #### 调度核心参数(`configs/config.yaml → scheduler`)
 
@@ -594,24 +596,67 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=32) as ex:
 scheduler:
   min_interval_sec: 60          # 单账号最小间隔秒(对抗同号高频 → 429)
   daily_usage_ratio: 0.6        # 单号日配额消耗超过 60% 自动熔断下线
-  lock_ttl_sec: 1200            # Redis 账号锁 TTL,lease 超时自动释放
+  lock_ttl_sec: 1200            # 内存锁账号锁 TTL,lease 超时自动释放
   cooldown_429_sec: 600         # 连续 429 时该账号冷却时间
   warned_pause_hours: 24        # 收到"警告页"后的账号强制停用时长
 ```
 
 #### 为什么能稳住高并发?
 
-1. **串行 lease + Redis 锁**:每个账号同一时刻只有 1 个请求在飞,`min_interval_sec` 保证两次请求之间的最小间隔,风控曲线平滑;
+1. **串行 lease + 内存锁**:每个账号同一时刻只有 1 个请求在飞,`min_interval_sec` 保证两次请求之间的最小间隔,风控曲线平滑;
 2. **代理强绑定**:每个账号锁死一个代理,IP 指纹不混用,触发风控的只是个别账号,其它账号不受牵连;
 3. **熔断自恢复**:账号消耗到阈值 / 收到 429 / 拿到警告页,自动进入冷却,冷却结束自动复活,无需人工干预;
-4. **横向扩展**:`docker compose up --scale server=3` 即可多副本;Redis 锁天然跨节点,MySQL + backups 卷共享即可;
+4. **磁盘缓存加速**:生成完成后图片自动预热写入 `data/YYYYMMDD/<md5>`,后续代理请求优先命中磁盘,不占账号资源;
 5. **观测友好**:`usage_logs` + `image_tasks` 两张表足以做任意维度(账号 / 用户 / 模型 / 时段)的下钻分析;后台「用量统计」已内置可视化。
+
+> **横向扩展**:由于使用进程内 MemoryLock,当前版本**不支持多副本分布式部署**。SQLite 单写者特性也限制了跨节点写并发。如需横向扩展,参见 [`deploy/README.md`](deploy/README.md#单节点-vs-多节点) 中的升级路径。
 
 #### 压测建议
 
 - 用 `vegeta` / `wrk2` 对 `/v1/images/generations` 做恒定 QPS 压测,观察 `usage_logs.status` 分布;
 - 对比调节 `min_interval_sec` 在 `30 / 60 / 90` 的成功率曲线,每批至少 500 样本;
-- Redis `pool_size` 和 MySQL `max_open_conns` 生产都推荐至少 500,否则会成为瓶颈。
+- SQLite WAL 模式下读并发无限制;写操作串行化,高写入量场景注意观察 `SQLITE_BUSY` 日志。
+
+### 8.5 本地磁盘图片缓存
+
+生成完成后,`image runner` 在后台自动将所有原图预热写入本地磁盘;图片代理(包括缩略图)优先命中本地缓存,避免每次请求都重新拉取 CDN。
+
+#### 缓存目录结构
+
+```text
+data/
+└── 20260520/                   # 按日期分目录(YYYYMMDD)
+    ├── a1b2c3d4e5f6...         # 原图,文件名 = MD5(result_url)
+    ├── a1b2c3d4e5f6....ct      # content-type sidecar 文件("image/webp" 等)
+    ├── ff00aa11bb22...         # 缩略图,MD5(result_url + ":thumb_kb:10")
+    └── ff00aa11bb22....ct
+```
+
+- **按日期分目录**:旧日期目录可安全整体删除清理磁盘;
+- **原子写入**:先写 `*.tmp` 再 `rename`,防止并发写损坏;
+- **跨日期命中**:读取时 glob 扫描 `data/*/<md5>`,即使缓存写入日期与访问日期不同也能命中。
+
+#### 缓存键设计
+
+| 场景 | 缓存键 |
+|------|-------|
+| 原图(无缩略图) | `result_urls[idx]`(图片的原始 URL 字符串) |
+| 缩略图 `?thumb_kb=N` | `result_urls[idx] + ":thumb_kb:N"` |
+
+不同 `thumb_kb` 值各自独立缓存,互不影响。
+
+#### 响应头
+
+| 响应头 | 含义 |
+|-------|------|
+| `X-Cache: HIT` | 命中本地磁盘缓存 |
+| `X-Thumb-KB: 10` | 当前为缩略图响应,目标大小 10 KB |
+| `Cache-Control: private, max-age=86400` | 浏览器本地缓存 1 天 |
+
+#### 预热时机
+
+- **生成完成后**(runner `MarkSuccess` 之后):后台 goroutine 拉取全部原图并写缓存,不阻塞响应;
+- **代理首次访问时**(缓存未命中):拉取原图、执行缩略图处理后,写缓存供下次命中。
 
 ---
 
@@ -629,13 +674,13 @@ scheduler:
 | 积分管理 | `/admin/credits` | 手动调账、账变流水 |
 | 充值订单 | `/admin/recharges` | 充值流水、套餐管理 |
 | GPT 账号池 | `/admin/accounts` | JSON / AT / RT / ST 批量导入、刷新、探测、熔断 |
-| 代理管理 | `/admin/proxies` | HTTP / SOCKS5、健康分探测 |
+| 代理管理 | `/admin/proxies` | HTTP / SOCKS5、健康分彩色标签(≥71 绿/41-70 黄/≤40 红)、单条/全量探测、批量导入 |
 | 模型配置 | `/admin/models` | 对外 slug → 上游 slug 映射、每张图 / 每 1M token 计费 |
 | 用户分组 | `/admin/groups` | 分组倍率(VIP / 内部 / 渠道) |
 | 全局 Keys | `/admin/keys` | 跨用户管控所有下游 Key |
 | 用量统计 | `/admin/usage` | 全站成功率 / Token / 积分收入 |
 | 审计日志 | `/admin/audit` | 管理员所有写操作自动落审计 |
-| 数据备份 | `/admin/backup` | `mysqldump` 一键备份 / 恢复 |
+| 数据备份 | `/admin/backup` | SQLite 数据库一键备份 / 恢复(gzip 压缩) |
 | 系统设置 | `/admin/settings` | 站点名 / 邮件 / 易支付 / 网关调度参数 |
 
 ---
@@ -656,11 +701,11 @@ gpt2api/
 │   ├── backup/                   # 数据库备份 / 恢复
 │   ├── billing/                  # 积分预扣 / 结算
 │   ├── gateway/                  # OpenAI 兼容入口(chat / images / images_proxy)
-│   ├── image/                    # 图片任务 Runner / 异步任务 / DAO
+│   ├── image/                    # 图片任务 Runner / 异步任务 / DAO / 本地磁盘缓存(local_cache.go)
 │   ├── middleware/               # CORS / JWT / Recover / RequestID / RateLimit
 │   ├── model/                    # 模型配置(slug 映射 + 价格)
 │   ├── proxy/                    # 代理池 + 健康分探测
-│   ├── ratelimit/                # Redis 令牌桶
+│   ├── ratelimit/                # 内存令牌桶(MemoryBucket,进程内限流)
 │   ├── rbac/                     # 权限常量
 │   ├── recharge/                 # 充值 / 套餐 / EPay 对接
 │   ├── scheduler/                # 账号调度器(核心)
@@ -677,7 +722,7 @@ gpt2api/
 │   │   ├── config/               # feature flag(含 ENABLE_CHAT_MODEL)
 │   │   ├── stores/               # pinia
 │   │   ├── views/personal/       # 用户侧页面
-│   │   ├── views/admin/          # 管理员页面
+│   │   ├── views/admin/          # 管理员页面(含 Proxies.vue 代理池管理)
 │   │   └── router/
 │   └── dist/                     # 构建产物(Dockerfile 会 COPY 进镜像)
 ├── API_NOTES.md                # chatgpt.com 逆向接口备忘
@@ -694,7 +739,7 @@ gpt2api/
 ```bash
 # 本机拉依赖
 go mod tidy
-# 跑迁移(先启 MySQL)
+# 跑迁移(需确保 data/ 目录可写)
 make migrate-up
 # 本地热跑
 make run
@@ -761,15 +806,30 @@ IMG2 正式上线后,`gpt2api` 默认 SSE 解析完成后最多短轮询 **300 �
 </details>
 
 <details>
-<summary><b>Q5. MySQL / Redis 能用公有云托管吗?</b></summary>
+<summary><b>Q5. 需要额外部署 MySQL 或 Redis 吗?</b></summary>
 
-可以。修改 `.env` / `configs/config.yaml` 的 DSN 与 `redis.addr` 即可。Redis 建议至少 Redis 7,且开启 AOF;MySQL 建议 8.0+,`max_connections >= 500`。
+**不需要**。本项目使用嵌入式 SQLite 3(CGO-free `modernc.org/sqlite`),所有业务数据持久化到 `data/gpt2api.db` 单文件;限流使用进程内内存令牌桶(MemoryBucket),账号锁使用进程内 MemoryLock,均不依赖任何外部进程。
+
+Docker Compose 只需启动 **一个 `server` 容器**,无 MySQL / Redis 服务。
+
+**数据持久化**:Docker volume 挂载 `/app/data`,容器重建后数据不丢失。备份只需在「管理后台 → 数据备份」一键下载 gzip 压缩包,或直接拷贝 `data/gpt2api.db` 文件。
 </details>
 
 <details>
 <summary><b>Q6. 如何横向扩展到多节点?</b></summary>
 
-`docker compose up -d --scale server=3` + 前面挂 Nginx / Traefik 做 L7。Redis 分布式锁天然支持多副本;MySQL 和 JWT / AES 密钥统一即可;`backups` 卷改成共享存储(NFS / S3 fuse)。详见 [`deploy/README.md`](deploy/README.md#单节点-vs-多节点)。
+当前版本**不支持原生多副本水平扩展**,原因有二:
+
+1. **SQLite 单写者**:SQLite 同一时刻只能有一个写连接(WAL 模式下读并发不限,但写仍串行化)。多个 `server` 容器若共享同一个 SQLite 文件,会产生 `SQLITE_BUSY` 竞争;
+2. **进程内 MemoryLock**:账号调度锁仅存在于当前进程内存中,多副本之间无法共享锁状态,可能产生同一账号被两个副本同时占用的竞争。
+
+**实用建议**:
+
+- **垂直扩展**:单节点 VPS 升配(2 核 → 4 核,RAM 4G → 8G)通常比多副本收益更明显;
+- **账号池扩容**:更多账号 = 更高并发上限,比扩实例更直接;
+- **多实例隔离部署**:不同 VPS 各跑独立实例(不共享 DB 文件),分别管理各自账号池,然后在上层做 API 网关轮询。
+
+如果未来确实需要分布式部署,可以考虑将持久层切换为 PostgreSQL + 分布式锁(如 pg advisory lock 或 Redis),参见 [`deploy/README.md`](deploy/README.md#单节点-vs-多节点)。
 </details>
 
 <details>
@@ -786,10 +846,9 @@ IMG2 正式上线后,`gpt2api` 默认 SSE 解析完成后最多短轮询 **300 �
 **① 提权已有用户为 admin**(前提:你记得该账号的密码)
 
 ```bash
-# 替换成你的 MySQL 容器名 / 用户名 / 密码 / 目标邮箱
-docker exec -e MYSQL_PWD='<your_mysql_password>' gpt2api-mysql \
-  mysql -ugpt2api gpt2api \
-  -e "UPDATE users SET role='admin' WHERE email='you@example.com';"
+# SQLite 方式:进入容器直接操作 db 文件
+docker exec -it gpt2api-server sqlite3 /app/data/gpt2api.db \
+  "UPDATE users SET role='admin' WHERE email='you@example.com';"
 ```
 
 **② 重置某个用户的密码为已知明文**
@@ -812,10 +871,8 @@ go run . 'MyNewPassword@123'
 # 输出例如:$2a$10$ljpcvSGUybg8vN4Bd3zjBu1YlQipf/gkeWMOflGUvw7EoTfM4/t.i
 
 # 2) 把这个 hash 写进 users.password_hash(整行原样粘贴,带 $2a$...)
-docker exec -e MYSQL_PWD='<your_mysql_password>' gpt2api-mysql \
-  mysql -ugpt2api gpt2api -e "UPDATE users \
-    SET password_hash='\$2a\$10\$ljpcvSGUybg8vN4Bd3zjBu1YlQipf/gkeWMOflGUvw7EoTfM4/t.i' \
-    WHERE email='you@example.com';"
+docker exec -it gpt2api-server sqlite3 /app/data/gpt2api.db \
+  "UPDATE users SET password_hash='\$2a\$10\$ljpcvSGUybg8vN4Bd3zjBu1YlQipf/gkeWMOflGUvw7EoTfM4/t.i' WHERE email='you@example.com';"
 
 # 3) 用新密码 MyNewPassword@123 登录即可。
 ```
@@ -836,22 +893,27 @@ bcrypt 同明文每次生成的 hash 不同都能互相校验,上面的 hash 字
 </details>
 
 <details>
-<summary><b>Q10. GPT 账号池批量删除后再导入报 <code>Error 1062 Duplicate entry xxx for key 'oai_accounts.uk_email'</code>?</b></summary>
+<summary><b>Q10. GPT 账号池批量删除后再导入报唯一键冲突?</b></summary>
 
 这是 **v0.x 初期 schema 的遗留 bug**,已在迁移 `20260423000004_accounts_uk_email_soft_delete_aware.sql` 修复。升级后重导不再冲突,无需手工清理。
 
-**为什么会冲突?** `oai_accounts` 的删除是软删除(只置 `deleted_at`,不真删行),方便审计回溯;但初始 schema 对 `email` 建的是**纯列**唯一索引 `uk_email`,没考虑"软删应当释放 email 槽位"。结果软删后那个 email 仍占着唯一键,再导入同 email 立刻 1062。
+**为什么会冲突?** `oai_accounts` 的删除是软删除(只置 `deleted_at`,不真删行),方便审计回溯;但初始 schema 对 `email` 建的是**普通唯一索引** `uk_email`,没考虑"软删应当释放 email 槽位"。结果软删后那个 email 仍占着唯一键,再导入同 email 立刻报 `UNIQUE constraint failed`。
 
-**修复做法**:MySQL 原生不支持 Postgres 那种 `CREATE UNIQUE INDEX ... WHERE deleted_at IS NULL` 的部分索引,所以引入一个 STORED 生成列:
+**修复做法**:SQLite 原生支持带 `WHERE` 子句的**部分索引**,修复极为简洁:
 
 ```sql
-active_email = CASE WHEN deleted_at IS NULL THEN email ELSE NULL END
-UNIQUE KEY uk_active_email (active_email)
+-- 删除旧的全量唯一索引
+DROP INDEX IF EXISTS uk_email;
+
+-- 建立仅对"未删除行"生效的部分唯一索引
+CREATE UNIQUE INDEX uk_active_email
+  ON oai_accounts (email)
+  WHERE deleted_at IS NULL;
 ```
 
-MySQL 的唯一索引允许多个 NULL 共存:活行 `active_email = email` → 唯一性生效;软删行 `active_email = NULL` → 互不冲突,也不和活行冲突。再导入同 email 完全放行。
+活行(`deleted_at IS NULL`)受唯一约束保护;软删行(`deleted_at NOT NULL`)不参与索引,可反复导入同 email。
 
-**升级步骤**:`git pull` → `docker compose build server` → `docker compose up -d`,容器内 goose 会自动跑这条迁移。老库那些被软删卡住的行**迁移生效后自动"让位"**,不需要你手工 `UPDATE` 或 `DELETE` 清理。
+**升级步骤**:`git pull` → `docker compose build server` → `docker compose up -d`,容器内 goose 会自动应用这条迁移。老库那些被软删卡住的行**迁移生效后自动"让位"**,不需要你手工 `UPDATE` 或 `DELETE` 清理。
 </details>
 
 ---
@@ -867,11 +929,13 @@ MySQL 的唯一索引允许多个 NULL 共存:活行 `active_email = email` → 
 - [x] M7 风控熔断 + 图片签名代理
 - [x] M8 IMG2 终稿直出 + 多图聚合
 - [x] M9 本地 2K/4K 高清放大(Catmull-Rom + LRU 缓存)
-- [ ] M10 Turnstile solver 接入 → 恢复文字通路
-- [ ] M11 图片任务大批量 Worker 池
-- [ ] M12 账号分组(按出图成功率 / 地区分配)
-- [ ] M13 Prometheus 指标 + Grafana 大盘
-- [ ] M14 对接 Real-ESRGAN 等 AI 超分作为 4K 放大的可选后端
+- [x] M10 本地磁盘图片缓存(原图 + 缩略图,按日期目录,原子写入,X-Cache 响应头)
+- [x] M11 代理池管理 UI(健康分彩色标签、单条/全量探测、批量导入)
+- [ ] M12 Turnstile solver 接入 → 恢复文字通路
+- [ ] M13 图片任务大批量 Worker 池
+- [ ] M14 账号分组(按出图成功率 / 地区分配)
+- [ ] M15 Prometheus 指标 + Grafana 大盘
+- [ ] M16 对接 Real-ESRGAN 等 AI 超分作为 4K 放大的可选后端
 
 ---
 
