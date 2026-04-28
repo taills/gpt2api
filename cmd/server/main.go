@@ -16,8 +16,6 @@ import (
 "github.com/432539/gpt2api/internal/apikey"
 "github.com/432539/gpt2api/internal/audit"
 "github.com/432539/gpt2api/internal/auth"
-"github.com/432539/gpt2api/internal/billing"
-"github.com/432539/gpt2api/internal/channel"
 "github.com/432539/gpt2api/internal/config"
 "github.com/432539/gpt2api/internal/db"
 "github.com/432539/gpt2api/internal/gateway"
@@ -106,23 +104,14 @@ if err := modelReg.Preload(context.Background()); err != nil {
 log.Warn("model preload failed", zap.Error(err))
 }
 
-channelDAO := channel.NewDAO(sqldb)
-channelSvc := channel.NewService(channelDAO, cipher)
-channelRouter := channel.NewRouter(channelSvc)
-channelH := channel.NewHandler(channelSvc, channelRouter)
-
 rl := lock.NewMemoryLock()
 sched := scheduler.New(accSvc, proxySvc, rl, cfg.Scheduler)
 
 tb := pkgratelimit.NewMemoryBucket()
 limiter := gwratelimit.New(tb)
 
-groupCache := user.NewGroupCache(userDAO, 30*time.Second)
-
 usageLogger := usage.New(sqldb, usage.Options{})
 defer usageLogger.Close()
-
-billEngine := billing.New(sqldb)
 
 jm := pkgjwt.NewManager(pkgjwt.Config{
 Secret:        cfg.JWT.Secret,
@@ -135,13 +124,10 @@ authSvc := auth.NewService(userDAO, jm, cfg.Security.BcryptCost)
 gwH := &gateway.Handler{
 Models:    modelReg,
 Keys:      keySvc,
-Billing:   billEngine,
 Scheduler: sched,
-Groups:    groupCache,
 Limiter:   limiter,
 Usage:     usageLogger,
 AccSvc:    accSvc,
-Channels:  channelRouter,
 }
 
 imageDAO := image.NewDAO(sqldb)
@@ -161,8 +147,7 @@ return gateway.BuildImageProxyURL(taskID, idx, gateway.ImageProxyTTL)
 auditDAO := audit.NewDAO(sqldb)
 auditH := audit.NewHandler(auditDAO)
 
-adminUserH := user.NewAdminHandler(userDAO, authSvc, billEngine, auditDAO)
-adminGroupH := user.NewAdminGroupHandler(userDAO, auditDAO)
+adminUserH := user.NewAdminHandler(userDAO, authSvc, auditDAO)
 
 adminModelH := modelpkg.NewAdminHandler(modelDAO, modelReg, auditDAO)
 adminKeyH := apikey.NewAdminHandler(keySvc, keyDAO, sqldb)
@@ -196,7 +181,6 @@ log.Warn("settings reload failed, using defaults", zap.Error(err))
 }
 settingsH := settings.NewHandler(settingsSvc, mailSvc, auditDAO)
 authSvc.SetSettings(settingsSvc)
-authSvc.SetBilling(billEngine)
 
 keySvc.SetSettings(settingsSvc)
 gwH.Settings = settingsSvc
@@ -250,15 +234,12 @@ KeyH:     apikey.NewHandler(keySvc),
 ProxyH:   proxyH,
 AccountH: accountH,
 
-ChannelH: channelH,
-
 GatewayH: gwH,
 ImagesH:  imagesH,
 
-AuditH:      auditH,
-AuditDAO:    auditDAO,
-AdminUserH:  adminUserH,
-AdminGroupH: adminGroupH,
+AuditH:     auditH,
+AuditDAO:   auditDAO,
+AdminUserH: adminUserH,
 
 AdminModelH: adminModelH,
 AdminKeyH:   adminKeyH,

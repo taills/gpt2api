@@ -24,15 +24,4 @@ type User struct {
 	DeletedAt     sql.NullTime  `db:"deleted_at" json:"-"`
 }
 
-// Group 对应 user_groups 表。
-type Group struct {
-	ID                 uint64    `db:"id" json:"id"`
-	Name               string    `db:"name" json:"name"`
-	Ratio              float64   `db:"ratio" json:"ratio"`
-	DailyLimitCredits  int64     `db:"daily_limit_credits" json:"daily_limit_credits"`
-	RPMLimit           int       `db:"rpm_limit" json:"rpm_limit"`
-	TPMLimit           int64     `db:"tpm_limit" json:"tpm_limit"`
-	Remark             string    `db:"remark" json:"remark"`
-	CreatedAt          time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt          time.Time `db:"updated_at" json:"updated_at"`
-}
+

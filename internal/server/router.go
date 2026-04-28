@@ -7,7 +7,6 @@ import (
 	"github.com/432539/gpt2api/internal/apikey"
 	"github.com/432539/gpt2api/internal/audit"
 	"github.com/432539/gpt2api/internal/auth"
-	"github.com/432539/gpt2api/internal/channel"
 	"github.com/432539/gpt2api/internal/config"
 	"github.com/432539/gpt2api/internal/gateway"
 	"github.com/432539/gpt2api/internal/image"
@@ -30,19 +29,17 @@ type Deps struct {
 	AuthH *auth.Handler
 	UserH *user.Handler
 
-	KeySvc     *apikey.Service
-	KeyH       *apikey.Handler
-	ProxyH     *proxy.Handler
-	AccountH   *account.Handler
-	ChannelH   *channel.Handler
+	KeySvc   *apikey.Service
+	KeyH     *apikey.Handler
+	ProxyH   *proxy.Handler
+	AccountH *account.Handler
 
 	GatewayH *gateway.Handler
 	ImagesH  *gateway.ImagesHandler
 
-	AuditH      *audit.Handler
-	AuditDAO    *audit.DAO
-	AdminUserH  *user.AdminHandler
-	AdminGroupH *user.AdminGroupHandler
+	AuditH     *audit.Handler
+	AuditDAO   *audit.DAO
+	AdminUserH *user.AdminHandler
 
 	AdminModelH *model.AdminHandler
 	AdminKeyH   *apikey.AdminHandler
@@ -106,10 +103,8 @@ func New(d *Deps) *gin.Engine {
 					ug.GET("/stats", d.MeUsageH.Stats)
 				}
 			}
-			// 当前用户的积分流水(只读)
-			authed.GET("/me/credit-logs",
-				middleware.RequirePerm(rbac.PermSelfUsage), d.UserH.CreditLogs)
-			if d.MeImageH != nil {
+			// 当前用户的用量明细(credit-logs 已移除)
+		if d.MeImageH != nil {
 				ig := authed.Group("/me/images", middleware.RequirePerm(rbac.PermSelfImage))
 				{
 					ig.GET("/tasks", d.MeImageH.List)
@@ -199,30 +194,6 @@ func New(d *Deps) *gin.Engine {
 					ug.POST("/:id/reset-password",
 						middleware.RequirePerm(rbac.PermUserWrite), d.AdminUserH.ResetPassword)
 					ug.DELETE("/:id", middleware.RequirePerm(rbac.PermUserWrite), d.AdminUserH.Delete)
-					// 积分调账
-					ug.POST("/:id/credits/adjust",
-						middleware.RequirePerm(rbac.PermUserCredit), d.AdminUserH.Adjust)
-					ug.GET("/:id/credit-logs",
-						middleware.RequirePerm(rbac.PermUsageReadAll), d.AdminUserH.CreditLogs)
-				}
-
-				// ---- 积分管理(全局视图) ----
-				cg := admin.Group("/credits", middleware.RequirePerm(rbac.PermUserCredit))
-				{
-					cg.GET("/summary", d.AdminUserH.CreditsSummary)
-					cg.GET("/logs", d.AdminUserH.CreditLogsGlobal)
-					cg.POST("/adjust", d.AdminUserH.AdjustByUser)
-				}
-			}
-
-			// ---- 用户分组 ----
-			if d.AdminGroupH != nil {
-				gg := admin.Group("/groups", middleware.RequirePerm(rbac.PermGroupWrite))
-				{
-					gg.GET("", d.AdminGroupH.List)
-					gg.POST("", d.AdminGroupH.Create)
-					gg.PUT("/:id", d.AdminGroupH.Update)
-					gg.DELETE("/:id", d.AdminGroupH.Delete)
 				}
 			}
 
@@ -235,32 +206,6 @@ func New(d *Deps) *gin.Engine {
 			// 生成记录(管理员全局视图)
 			if d.AdminImageH != nil {
 				admin.GET("/image-tasks", middleware.RequirePerm(rbac.PermUsageReadAll), d.AdminImageH.List)
-			}
-
-			// ---- 上游渠道(OpenAI/Gemini 兼容) ----
-			if d.ChannelH != nil {
-				cg := admin.Group("/channels",
-					middleware.RequirePerm(rbac.PermChannelRead, rbac.PermChannelWrite))
-				{
-					cg.GET("", d.ChannelH.List)
-					cg.POST("", middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.Create)
-					cg.GET("/:id", d.ChannelH.Get)
-					cg.PATCH("/:id", middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.Update)
-					cg.DELETE("/:id", middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.Delete)
-					cg.POST("/:id/test", middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.Test)
-					cg.GET("/:id/mappings", d.ChannelH.ListMappings)
-					cg.POST("/:id/mappings",
-						middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.CreateMapping)
-				}
-				// 映射单条操作:另起一组,避免和 /channels/:id 冲突。
-				mg := admin.Group("/channel-mappings",
-					middleware.RequirePerm(rbac.PermChannelRead, rbac.PermChannelWrite))
-				{
-					mg.PATCH("/:mid",
-						middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.UpdateMapping)
-					mg.DELETE("/:mid",
-						middleware.RequirePerm(rbac.PermChannelWrite), d.ChannelH.DeleteMapping)
-				}
 			}
 
 			// ---- 模型配置 ----
