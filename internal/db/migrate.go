@@ -22,19 +22,54 @@ func Migrate(db *sqlx.DB) error {
 	return nil
 }
 
-// splitStatements splits a SQL file on ";" delimiters and trims whitespace /
-// comment-only entries.
+// splitStatements splits a SQL file on ";" delimiters, respecting single-quoted
+// string literals, and trims whitespace / comment-only entries.
 func splitStatements(sql string) []string {
-	parts := strings.Split(sql, ";")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
+	var stmts []string
+	var buf strings.Builder
+	inSingleQuote := false
+
+	for i := 0; i < len(sql); i++ {
+		ch := sql[i]
+		switch {
+		case ch == '\'' && !inSingleQuote:
+			inSingleQuote = true
+			buf.WriteByte(ch)
+		case ch == '\'' && inSingleQuote:
+			buf.WriteByte(ch)
+			// handle escaped single-quote ''
+			if i+1 < len(sql) && sql[i+1] == '\'' {
+				i++
+				buf.WriteByte(sql[i])
+			} else {
+				inSingleQuote = false
+			}
+		case ch == ';' && !inSingleQuote:
+			stmt := strings.TrimSpace(buf.String())
+			buf.Reset()
+			if stmt == "" {
+				continue
+			}
+			// Skip entries that consist only of comment lines
+			allComment := true
+			for _, line := range strings.Split(stmt, "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" && !strings.HasPrefix(line, "--") {
+					allComment = false
+					break
+				}
+			}
+			if !allComment {
+				stmts = append(stmts, stmt)
+			}
+		default:
+			buf.WriteByte(ch)
 		}
-		// Skip entries that consist only of comment lines
+	}
+	// Handle trailing statement without a trailing semicolon
+	if stmt := strings.TrimSpace(buf.String()); stmt != "" {
 		allComment := true
-		for _, line := range strings.Split(p, "\n") {
+		for _, line := range strings.Split(stmt, "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" && !strings.HasPrefix(line, "--") {
 				allComment = false
@@ -42,8 +77,8 @@ func splitStatements(sql string) []string {
 			}
 		}
 		if !allComment {
-			out = append(out, p)
+			stmts = append(stmts, stmt)
 		}
 	}
-	return out
+	return stmts
 }

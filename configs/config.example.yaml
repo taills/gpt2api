@@ -15,14 +15,14 @@ sqlite:
   path: "data/gpt2api.db"
 
 jwt:
-  secret: "CHANGE_ME_TO_RANDOM_32_BYTES_SECRET"
+  secret: "3957f6d117afbce6e86b748f55f013b2b806a5df8dda837c32d4637cdb4fbf75"
   access_ttl_sec: 86400
   refresh_ttl_sec: 2592000
   issuer: "gpt2api"
 
 crypto:
   # 32 字节 hex(64 字符),用于 AES-256-GCM 加密账号 AT / cookies
-  aes_key: "CHANGE_ME_TO_64_HEX_CHARS_AES_256_KEY_000000000000000000000000"
+  aes_key: "3957f6d117afbce6e86b748f55f013b2b806a5df8dda837c32d4637cdb4fbf75"
 
 security:
   bcrypt_cost: 10

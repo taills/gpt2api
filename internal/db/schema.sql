@@ -1,5 +1,5 @@
 -- SQLite schema — combined from all migrations, idempotent (IF NOT EXISTS everywhere).
--- Generated for SQLite; no MySQL-specific syntax.
+-- Generated for SQLite. No MySQL-specific syntax.
 
 -- ============================================================
 -- user_groups
@@ -73,24 +73,6 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_api_keys_key_hash ON api_keys(key_hash);
 CREATE        INDEX IF NOT EXISTS idx_api_keys_user     ON api_keys(user_id);
 CREATE        INDEX IF NOT EXISTS idx_api_keys_enabled  ON api_keys(enabled);
-
--- ============================================================
--- credit_transactions
--- ============================================================
-CREATE TABLE IF NOT EXISTS credit_transactions (
-    id            INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    user_id       INTEGER  NOT NULL,
-    key_id        INTEGER  NOT NULL DEFAULT 0,
-    type          TEXT     NOT NULL,
-    amount        INTEGER  NOT NULL,
-    balance_after INTEGER  NOT NULL,
-    ref_id        TEXT     NOT NULL DEFAULT '',
-    remark        TEXT     NOT NULL DEFAULT '',
-    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_credit_tx_user_created ON credit_transactions(user_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_credit_tx_key          ON credit_transactions(key_id);
-CREATE INDEX IF NOT EXISTS idx_credit_tx_type         ON credit_transactions(type);
 
 -- ============================================================
 -- proxies
@@ -177,19 +159,6 @@ CREATE TABLE IF NOT EXISTS account_proxy_bindings (
 CREATE INDEX IF NOT EXISTS idx_apb_proxy ON account_proxy_bindings(proxy_id);
 
 -- ============================================================
--- account_quota_snapshots
--- ============================================================
-CREATE TABLE IF NOT EXISTS account_quota_snapshots (
-    id           INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    account_id   INTEGER  NOT NULL,
-    feature_name TEXT     NOT NULL,
-    remaining    INTEGER  NOT NULL DEFAULT 0,
-    reset_after  DATETIME,
-    snapshot_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_aqs_account_feature ON account_quota_snapshots(account_id, feature_name, snapshot_at);
-
--- ============================================================
 -- models
 -- ============================================================
 CREATE TABLE IF NOT EXISTS models (
@@ -231,6 +200,36 @@ INSERT OR IGNORE INTO models (slug, type, upstream_model_slug, input_price_per_1
     ('agent-mode',       'chat',  'agent-mode',       30000,  90000,       0, 'Agent');
 
 -- ============================================================
+-- usage_logs
+-- ============================================================
+CREATE TABLE IF NOT EXISTS usage_logs (
+    id                  INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    user_id             INTEGER  NOT NULL,
+    key_id              INTEGER  NOT NULL DEFAULT 0,
+    model_id            INTEGER  NOT NULL,
+    account_id          INTEGER  NOT NULL DEFAULT 0,
+    request_id          TEXT     NOT NULL DEFAULT '',
+    type                TEXT     NOT NULL DEFAULT 'chat',
+    input_tokens        INTEGER  NOT NULL DEFAULT 0,
+    output_tokens       INTEGER  NOT NULL DEFAULT 0,
+    cache_read_tokens   INTEGER  NOT NULL DEFAULT 0,
+    cache_write_tokens  INTEGER  NOT NULL DEFAULT 0,
+    image_count         INTEGER  NOT NULL DEFAULT 0,
+    credit_cost         INTEGER  NOT NULL DEFAULT 0,
+    duration_ms         INTEGER  NOT NULL DEFAULT 0,
+    status              TEXT     NOT NULL DEFAULT 'success',
+    error_code          TEXT     NOT NULL DEFAULT '',
+    ip                  TEXT     NOT NULL DEFAULT '',
+    ua                  TEXT     NOT NULL DEFAULT '',
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_usage_logs_user_time    ON usage_logs(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_logs_key_time     ON usage_logs(key_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_logs_model_time   ON usage_logs(model_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_logs_account_time ON usage_logs(account_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_logs_request_id   ON usage_logs(request_id);
+
+-- ============================================================
 -- image_tasks  (+ upscale column from migration 20260423000003)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS image_tasks (
@@ -258,22 +257,6 @@ CREATE TABLE IF NOT EXISTS image_tasks (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_image_tasks_task_id    ON image_tasks(task_id);
 CREATE        INDEX IF NOT EXISTS idx_image_tasks_user_time ON image_tasks(user_id, created_at);
 CREATE        INDEX IF NOT EXISTS idx_image_tasks_status    ON image_tasks(status);
-
--- ============================================================
--- redeem_codes
--- ============================================================
-CREATE TABLE IF NOT EXISTS redeem_codes (
-    id              INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    code            TEXT     NOT NULL,
-    batch_id        TEXT     NOT NULL DEFAULT '',
-    credits         INTEGER  NOT NULL,
-    used_by_user_id INTEGER  NOT NULL DEFAULT 0,
-    used_at         DATETIME,
-    expires_at      DATETIME,
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE UNIQUE INDEX IF NOT EXISTS uk_redeem_codes_code  ON redeem_codes(code);
-CREATE        INDEX IF NOT EXISTS idx_redeem_codes_batch ON redeem_codes(batch_id);
 
 -- ============================================================
 -- system_settings
@@ -331,49 +314,4 @@ CREATE INDEX IF NOT EXISTS idx_audit_actor_time  ON admin_audit_logs(actor_id, c
 CREATE INDEX IF NOT EXISTS idx_audit_action_time ON admin_audit_logs(action, created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_created_at  ON admin_audit_logs(created_at);
 
--- ============================================================
--- upstream_channels
--- ============================================================
-CREATE TABLE IF NOT EXISTS upstream_channels (
-    id              INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    name            TEXT     NOT NULL,
-    type            TEXT     NOT NULL,
-    base_url        TEXT     NOT NULL,
-    api_key_enc     TEXT     NOT NULL,
-    enabled         INTEGER  NOT NULL DEFAULT 1,
-    priority        INTEGER  NOT NULL DEFAULT 100,
-    weight          INTEGER  NOT NULL DEFAULT 1,
-    timeout_s       INTEGER  NOT NULL DEFAULT 120,
-    ratio           REAL     NOT NULL DEFAULT 1.0,
-    extra           TEXT,
-    status          TEXT     NOT NULL DEFAULT 'healthy',
-    fail_count      INTEGER  NOT NULL DEFAULT 0,
-    last_test_at    DATETIME,
-    last_test_ok    INTEGER,
-    last_test_error TEXT     NOT NULL DEFAULT '',
-    remark          TEXT     NOT NULL DEFAULT '',
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at      DATETIME
-);
-CREATE INDEX IF NOT EXISTS idx_uc_enabled_priority ON upstream_channels(enabled, priority);
-CREATE INDEX IF NOT EXISTS idx_uc_type             ON upstream_channels(type);
 
--- ============================================================
--- channel_model_mappings
--- ============================================================
-CREATE TABLE IF NOT EXISTS channel_model_mappings (
-    id             INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    channel_id     INTEGER  NOT NULL,
-    local_model    TEXT     NOT NULL,
-    upstream_model TEXT     NOT NULL,
-    modality       TEXT     NOT NULL DEFAULT 'text',
-    enabled        INTEGER  NOT NULL DEFAULT 1,
-    priority       INTEGER  NOT NULL DEFAULT 100,
-    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (channel_id) REFERENCES upstream_channels(id) ON DELETE CASCADE
-);
-CREATE UNIQUE INDEX IF NOT EXISTS uk_cmm_channel_local_modality ON channel_model_mappings(channel_id, local_model, modality);
-CREATE        INDEX IF NOT EXISTS idx_cmm_local_model            ON channel_model_mappings(local_model, enabled);
-CREATE        INDEX IF NOT EXISTS idx_cmm_channel                ON channel_model_mappings(channel_id);

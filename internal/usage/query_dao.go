@@ -189,7 +189,7 @@ SELECT COUNT(*)                                                                A
        COALESCE(SUM(
          CASE
            WHEN u.type='image' AND u.status='success'
-             THEN GREATEST(u.image_count, 1)
+             THEN MAX(u.image_count, 1)
            WHEN u.type='image'
              THEN u.image_count
            ELSE 0
@@ -224,13 +224,13 @@ SELECT u.model_id,
        COALESCE(SUM(
          CASE
            WHEN u.type='image' AND u.status='success'
-             THEN GREATEST(u.image_count, 1)
+             THEN MAX(u.image_count, 1)
            ELSE u.image_count
          END
        ), 0)                                               AS image_count,
        COALESCE(SUM(u.credit_cost),   0)                   AS credit_cost,
-       /* AVG 返回 DECIMAL(driver 会给 []uint8),必须 CAST 回整数才能 scan 进 int64 */
-       COALESCE(CAST(AVG(u.duration_ms) AS SIGNED), 0)     AS avg_dur_ms
+       /* AVG 返回浮点数,CAST 为 INTEGER 后 scan 进 int64 */
+       COALESCE(CAST(AVG(u.duration_ms) AS INTEGER), 0)    AS avg_dur_ms
 FROM usage_logs u
 LEFT JOIN models m ON m.id = u.model_id
 %s
@@ -280,7 +280,7 @@ func (d *QueryDAO) Daily(ctx context.Context, f Filter, days int) ([]DailyPoint,
 	where, args := d.buildWhere(f)
 
 	q := fmt.Sprintf(`
-SELECT DATE_FORMAT(u.created_at, '%%Y-%%m-%%d')            AS day,
+SELECT strftime('%%Y-%%m-%%d', u.created_at)               AS day,
        COUNT(*)                                            AS requests,
        COALESCE(SUM(CASE WHEN u.status='failed' THEN 1 ELSE 0 END), 0) AS failures,
        COALESCE(SUM(u.input_tokens),  0)                   AS input_tokens,
@@ -288,7 +288,7 @@ SELECT DATE_FORMAT(u.created_at, '%%Y-%%m-%%d')            AS day,
        COALESCE(SUM(
          CASE
            WHEN u.type='image' AND u.status='success'
-             THEN GREATEST(u.image_count, 1)
+             THEN MAX(u.image_count, 1)
            ELSE u.image_count
          END
        ), 0)                                               AS image_count,

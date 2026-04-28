@@ -44,7 +44,8 @@ fi
 # ---- step2: 后端(embed 已内嵌前端) ----
 echo "[build-local] step2 = cross-build gpt2api (linux/amd64)"
 mkdir -p deploy/bin
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+# GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+CGO_ENABLED=0 \
     go build -ldflags "-s -w" -o deploy/bin/gpt2api ./cmd/server
 
 echo "[build-local] done."
