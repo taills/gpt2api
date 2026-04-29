@@ -17,7 +17,7 @@ export const useSiteStore = defineStore('site', () => {
     'site.logo_url': '',
     'site.footer': '',
     'site.contact_email': '',
-    'auth.allow_register': 'true',
+    'auth.allow_register': 'false',
   })
   const loaded = ref(false)
 

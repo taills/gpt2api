@@ -23,7 +23,7 @@ INSERT INTO `system_settings` (`k`, `v`, `description`) VALUES
     ('site.footer',         '',                        '页脚版权/备案文本(支持纯文本)'),
     ('site.contact_email',  '',                        '站点对外联系邮箱'),
 
-    ('auth.allow_register',        'true',  '是否开放用户自助注册'),
+    ('auth.allow_register',        'false',  '是否开放用户自助注册'),
     ('auth.default_group_id',      '1',     '新用户默认分组 ID(user_groups.id)'),
     ('auth.signup_bonus_credits',  '0',     '新用户注册赠送积分(单位:厘;10000=1 积分)'),
 
