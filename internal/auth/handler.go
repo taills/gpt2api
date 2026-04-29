@@ -32,39 +32,42 @@ type refreshReq struct {
 }
 
 type loginResp struct {
-	User  *user.User       `json:"user"`
+	User  *user.User        `json:"user"`
 	Token *pkgjwt.TokenPair `json:"token"`
 }
 
 // POST /api/auth/register
 func (h *Handler) Register(c *gin.Context) {
-	var req registerReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.BadRequest(c, err.Error())
-		return
-	}
-	u, err := h.svc.Register(c.Request.Context(), req.Email, req.Password, req.Nickname)
-	if err != nil {
-		if errors.Is(err, ErrEmailExists) {
-			resp.Conflict(c, "email already registered")
-			return
-		}
-		if errors.Is(err, ErrRegisterDisabled) {
-			resp.Forbidden(c, "user registration is currently disabled")
-			return
-		}
-		if errors.Is(err, ErrEmailNotAllowed) {
-			resp.BadRequest(c, "this email domain is not allowed for registration")
-			return
-		}
-		if errors.Is(err, ErrPasswordTooShort) {
-			resp.BadRequest(c, "password is too short")
-			return
-		}
-		resp.Internal(c, err.Error())
-		return
-	}
-	resp.OK(c, u)
+	// 禁止注册
+	resp.Forbidden(c, "user registration is currently disabled")
+	return
+	// var req registerReq
+	// if err := c.ShouldBindJSON(&req); err != nil {
+	// 	resp.BadRequest(c, err.Error())
+	// 	return
+	// }
+	// u, err := h.svc.Register(c.Request.Context(), req.Email, req.Password, req.Nickname)
+	// if err != nil {
+	// 	if errors.Is(err, ErrEmailExists) {
+	// 		resp.Conflict(c, "email already registered")
+	// 		return
+	// 	}
+	// 	if errors.Is(err, ErrRegisterDisabled) {
+	// 		resp.Forbidden(c, "user registration is currently disabled")
+	// 		return
+	// 	}
+	// 	if errors.Is(err, ErrEmailNotAllowed) {
+	// 		resp.BadRequest(c, "this email domain is not allowed for registration")
+	// 		return
+	// 	}
+	// 	if errors.Is(err, ErrPasswordTooShort) {
+	// 		resp.BadRequest(c, "password is too short")
+	// 		return
+	// 	}
+	// 	resp.Internal(c, err.Error())
+	// 	return
+	// }
+	// resp.OK(c, u)
 }
 
 // POST /api/auth/login
