@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/432539/gpt2api/pkg/crypto"
+	"github.com/432539/gpt2api/pkg/sqltime"
 )
 
 // Service 账号池业务。
@@ -105,11 +106,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Account, error) 
 		Status: StatusHealthy, Notes: in.Notes,
 	}
 	if !in.TokenExpiresAt.IsZero() {
-		a.TokenExpiresAt = sql.NullTime{Time: in.TokenExpiresAt, Valid: true}
+		a.TokenExpiresAt = sqltime.From(in.TokenExpiresAt)
 	} else {
 		// 自动从 JWT 解析 exp
 		if exp := parseJWTExp(in.AuthToken); !exp.IsZero() {
-			a.TokenExpiresAt = sql.NullTime{Time: exp, Valid: true}
+			a.TokenExpiresAt = sqltime.From(exp)
 		}
 	}
 	id, err := s.dao.Create(ctx, a)
@@ -164,10 +165,10 @@ func (s *Service) Update(ctx context.Context, id uint64, in UpdateInput) (*Accou
 		a.SessionTokenEnc = sql.NullString{String: enc, Valid: true}
 	}
 	if !in.TokenExpiresAt.IsZero() {
-		a.TokenExpiresAt = sql.NullTime{Time: in.TokenExpiresAt, Valid: true}
+		a.TokenExpiresAt = sqltime.From(in.TokenExpiresAt)
 	} else if in.AuthToken != "" {
 		if exp := parseJWTExp(in.AuthToken); !exp.IsZero() {
-			a.TokenExpiresAt = sql.NullTime{Time: exp, Valid: true}
+			a.TokenExpiresAt = sqltime.From(exp)
 		}
 	}
 	if in.OAISessionID != "" {

@@ -1,8 +1,9 @@
 package model
 
 import (
-	"database/sql"
 	"time"
+
+	"github.com/432539/gpt2api/pkg/sqltime"
 )
 
 // 模型类型。
@@ -13,17 +14,17 @@ const (
 
 // Model 对应 models 表。
 type Model struct {
-	ID                    uint64       `db:"id" json:"id"`
-	Slug                  string       `db:"slug" json:"slug"`
-	Type                  string       `db:"type" json:"type"`
-	UpstreamModelSlug     string       `db:"upstream_model_slug" json:"upstream_model_slug"`
-	InputPricePer1M       int64        `db:"input_price_per_1m" json:"input_price_per_1m"`
-	OutputPricePer1M      int64        `db:"output_price_per_1m" json:"output_price_per_1m"`
-	CacheReadPricePer1M   int64        `db:"cache_read_price_per_1m" json:"cache_read_price_per_1m"`
-	ImagePricePerCall     int64        `db:"image_price_per_call" json:"image_price_per_call"`
-	Description           string       `db:"description" json:"description"`
-	Enabled               bool         `db:"enabled" json:"enabled"`
-	CreatedAt             time.Time    `db:"created_at" json:"created_at"`
-	UpdatedAt             time.Time    `db:"updated_at" json:"updated_at"`
-	DeletedAt             sql.NullTime `db:"deleted_at" json:"-"`
+	ID                  uint64           `db:"id" json:"id"`
+	Slug                string           `db:"slug" json:"slug"`
+	Type                string           `db:"type" json:"type"`
+	UpstreamModelSlug   string           `db:"upstream_model_slug" json:"upstream_model_slug"`
+	InputPricePer1M     int64            `db:"input_price_per_1m" json:"input_price_per_1m"`
+	OutputPricePer1M    int64            `db:"output_price_per_1m" json:"output_price_per_1m"`
+	CacheReadPricePer1M int64            `db:"cache_read_price_per_1m" json:"cache_read_price_per_1m"`
+	ImagePricePerCall   int64            `db:"image_price_per_call" json:"image_price_per_call"`
+	Description         string           `db:"description" json:"description"`
+	Enabled             bool             `db:"enabled" json:"enabled"`
+	CreatedAt           time.Time        `db:"created_at" json:"created_at"`
+	UpdatedAt           time.Time        `db:"updated_at" json:"updated_at"`
+	DeletedAt           sqltime.NullTime `db:"deleted_at" json:"-"`
 }

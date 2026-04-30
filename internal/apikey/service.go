@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/432539/gpt2api/pkg/sqltime"
+
 	"github.com/432539/gpt2api/internal/settings"
 )
 
@@ -164,7 +166,7 @@ func (s *Service) Create(ctx context.Context, userID uint64, in CreateInput) (*G
 		Enabled:       true,
 	}
 	if !in.ExpiresAt.IsZero() {
-		k.ExpiresAt = sql.NullTime{Time: in.ExpiresAt, Valid: true}
+		k.ExpiresAt = sqltime.From(in.ExpiresAt)
 	}
 	id, err := s.dao.Create(ctx, k)
 	if err != nil {
@@ -201,7 +203,7 @@ func (s *Service) Update(ctx context.Context, userID, id uint64, in UpdateInput)
 		k.TPM = in.TPM
 	}
 	if !in.ExpiresAt.IsZero() {
-		k.ExpiresAt = sql.NullTime{Time: in.ExpiresAt, Valid: true}
+		k.ExpiresAt = sqltime.From(in.ExpiresAt)
 	}
 	if in.Enabled != nil {
 		k.Enabled = *in.Enabled
