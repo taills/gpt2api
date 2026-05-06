@@ -15,6 +15,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -46,6 +47,41 @@ type NullTime struct {
 	Valid bool // Valid is true when Time is not NULL
 }
 
+// stripNumericZoneName strips the trailing numeric zone-name token that Go's
+// time.String() appends when the timezone was created via time.FixedZone with a
+// numeric name (e.g. "+0800").  In that case time.String() produces strings like
+//
+//	"2026-05-10 18:54:12 +0800 +0800"
+//
+// where the last token is the zone name ("+0800") rather than an alphabetic
+// abbreviation ("CST").  time.Parse's "MST" verb only accepts alphabetic zone
+// abbreviations, so we strip the numeric name before parsing.
+//
+// The function is a no-op when the trailing token is alphabetic or when the
+// string does not match the expected shape.
+func stripNumericZoneName(s string) string {
+	// Find the last space-separated token.
+	lastSpace := strings.LastIndex(s, " ")
+	if lastSpace < 0 {
+		return s
+	}
+	tail := s[lastSpace+1:]
+	// A numeric zone-name looks like "+0800" or "-0700": sign + 4 digits.
+	if len(tail) != 5 {
+		return s
+	}
+	if tail[0] != '+' && tail[0] != '-' {
+		return s
+	}
+	for _, c := range tail[1:] {
+		if c < '0' || c > '9' {
+			return s // alphabetic abbreviation – leave it
+		}
+	}
+	// Strip the numeric zone-name; the offset before it is sufficient.
+	return strings.TrimSpace(s[:lastSpace])
+}
+
 // Scan implements sql.Scanner. It accepts nil (→ not valid), time.Time
 // (→ direct), and string (→ parsed using known SQLite datetime formats).
 func (n *NullTime) Scan(value any) error {
@@ -62,8 +98,11 @@ func (n *NullTime) Scan(value any) error {
 			n.Time, n.Valid = time.Time{}, false
 			return nil
 		}
+		// Normalise strings produced by time.String() with a FixedZone whose name
+		// is a numeric offset (e.g. "2026-05-10 18:54:12 +0800 +0800").
+		normalized := stripNumericZoneName(v)
 		for _, layout := range sqliteFmts {
-			t, err := time.Parse(layout, v)
+			t, err := time.Parse(layout, normalized)
 			if err == nil {
 				n.Time, n.Valid = t, true
 				return nil
