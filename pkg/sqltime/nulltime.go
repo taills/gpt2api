@@ -34,8 +34,10 @@ var sqliteFmts = []string{
 	"2006-01-02 15:04:05.999999999",
 	"2006-01-02 15:04:05-07:00",
 	"2006-01-02 15:04:05",                     // most common SQLite text datetime
-	"2006-01-02 15:04:05.999999999 -0700 MST", // Go time.String() with nanoseconds
-	"2006-01-02 15:04:05 -0700 MST",           // Go time.String() without nanoseconds
+	"2006-01-02 15:04:05.999999999 -0700 MST", // Go time.String() with nanoseconds + alpha zone
+	"2006-01-02 15:04:05 -0700 MST",           // Go time.String() without nanoseconds + alpha zone
+	"2006-01-02 15:04:05.999999999 -0700",     // after stripNumericZoneName, with nanoseconds
+	"2006-01-02 15:04:05 -0700",               // after stripNumericZoneName: "2026-05-10 18:54:12 +0800"
 	"2006-01-02",                              // date-only
 }
 
