@@ -1,4 +1,3 @@
-package sqltime
 // Package sqltime provides a NullTime type that works correctly with the
 // modernc.org/sqlite driver, which returns DATETIME column values as Go
 // strings rather than time.Time. The standard sql.NullTime.Scan only accepts
@@ -21,15 +20,22 @@ import (
 
 // sqliteFmts is the set of datetime string formats the modernc.org/sqlite
 // driver can return for a DATETIME/TIMESTAMP column.
+//
+// The format "2006-01-02 15:04:05 -0700 MST" (and its nanosecond variant)
+// handles values stored via Go's time.Time.String(), which the modernc.org/sqlite
+// driver produces when a time.Time driver.Value is written without explicit
+// formatting (e.g. "2026-05-03 14:54:33 +0800 CST").
 var sqliteFmts = []string{
-	time.RFC3339Nano,           // "2006-01-02T15:04:05.999999999Z07:00"
-	time.RFC3339,               // "2006-01-02T15:04:05Z07:00"
-	"2006-01-02T15:04:05",      // without timezone
+	time.RFC3339Nano,      // "2006-01-02T15:04:05.999999999Z07:00"
+	time.RFC3339,          // "2006-01-02T15:04:05Z07:00"
+	"2006-01-02T15:04:05", // without timezone
 	"2006-01-02 15:04:05.999999999-07:00",
 	"2006-01-02 15:04:05.999999999",
 	"2006-01-02 15:04:05-07:00",
-	"2006-01-02 15:04:05",      // most common SQLite text datetime
-	"2006-01-02",               // date-only
+	"2006-01-02 15:04:05",                     // most common SQLite text datetime
+	"2006-01-02 15:04:05.999999999 -0700 MST", // Go time.String() with nanoseconds
+	"2006-01-02 15:04:05 -0700 MST",           // Go time.String() without nanoseconds
+	"2006-01-02",                              // date-only
 }
 
 // NullTime represents a nullable time value. It is a drop-in replacement
@@ -72,11 +78,14 @@ func (n *NullTime) Scan(value any) error {
 }
 
 // Value implements driver.Valuer so NullTime can be written back to the DB.
+// Returns a UTC RFC3339Nano string rather than time.Time to prevent the
+// modernc.org/sqlite driver from using Go's time.String() format
+// (e.g. "2026-05-03 14:54:33 +0800 CST"), which cannot be read back.
 func (n NullTime) Value() (driver.Value, error) {
 	if !n.Valid {
 		return nil, nil
 	}
-	return n.Time, nil
+	return n.Time.UTC().Format(time.RFC3339Nano), nil
 }
 
 // MarshalJSON serialises NullTime as a RFC3339Nano string or JSON null.

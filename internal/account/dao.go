@@ -18,6 +18,20 @@ func NewDAO(db *sqlx.DB) *DAO { return &DAO{db: db} }
 // DB 暴露底层 handle 给刷新器 / 探测器用于直接原子更新(少量场景)。
 func (d *DAO) DB() *sqlx.DB { return d.db }
 
+// fmtTime 将 time.Time 格式化为 RFC3339Nano UTC 字符串,作为 SQLite DATETIME 参数传入。
+// 直接传 time.Time 给 modernc.org/sqlite 驱动会导致其使用 Go 的 time.String() 格式
+// (如 "2026-05-03 14:54:33 +0800 CST"),该格式在读回时无法被 sqltime.NullTime 或
+// 标准驱动解析,产生 "unsupported Scan … storing string into *time.Time" 错误。
+func fmtTime(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+
+// fmtTimePtr 处理可选时间指针;nil 返回 nil(SQL NULL),非 nil 返回格式化字符串。
+func fmtTimePtr(t *time.Time) interface{} {
+	if t == nil {
+		return nil
+	}
+	return fmtTime(*t)
+}
+
 // fill 填充非 db 列的辅助字段。
 //
 // 这里把 today_used_count "归零"的逻辑也放进来:数据库里这个计数是按
@@ -167,10 +181,11 @@ func (d *DAO) ListNeedRefresh(ctx context.Context, aheadSec int, limit int) ([]*
 }
 
 // ListNeedProbeQuota 返回需要探测图片额度的账号。命中以下任一条件即纳入:
-//   (a) 从未探测过(image_quota_updated_at IS NULL);
-//   (b) 上次探测超过 minIntervalSec 秒(常规轮询);
-//   (c) **剩余额度=0 且已过 reset_at**:这种"归零等重置"的账号要第一时间补探,
-//       不受 minIntervalSec 限制,避免 5 小时轮询间隔导致的额度恢复滞后显示。
+//
+//	(a) 从未探测过(image_quota_updated_at IS NULL);
+//	(b) 上次探测超过 minIntervalSec 秒(常规轮询);
+//	(c) **剩余额度=0 且已过 reset_at**:这种"归零等重置"的账号要第一时间补探,
+//	    不受 minIntervalSec 限制,避免 5 小时轮询间隔导致的额度恢复滞后显示。
 func (d *DAO) ListNeedProbeQuota(ctx context.Context, minIntervalSec int, limit int) ([]*Account, error) {
 	rows := make([]*Account, 0, limit)
 	threshold := time.Now().Add(-time.Duration(minIntervalSec) * time.Second)
@@ -312,7 +327,7 @@ func (d *DAO) MarkUsed(ctx context.Context, id uint64, today time.Time) error {
              today_used_count = CASE WHEN today_used_date = ? THEN today_used_count + 1 ELSE 1 END,
              today_used_date  = ?
          WHERE id = ?`,
-		time.Now(), today, today, id)
+		fmtTime(time.Now()), today.Format("2006-01-02"), today.Format("2006-01-02"), id)
 	return err
 }
 
@@ -321,7 +336,7 @@ func (d *DAO) SetStatus(ctx context.Context, id uint64, status string, cooldownU
 	if cooldownUntil != nil {
 		_, err := d.db.ExecContext(ctx,
 			`UPDATE oai_accounts SET status=?, cooldown_until=? WHERE id=?`,
-			status, *cooldownUntil, id)
+			status, fmtTime(*cooldownUntil), id)
 		return err
 	}
 	_, err := d.db.ExecContext(ctx,
@@ -352,7 +367,7 @@ func (d *DAO) ApplyRefreshResult(
                  refresh_error = '',
                  status = CASE WHEN status IN ('dead','suspicious') THEN 'healthy' ELSE status END
              WHERE id = ? AND deleted_at IS NULL`,
-			newATEnc, newRTEnc, expiresAt, time.Now(), source, id)
+			newATEnc, newRTEnc, fmtTime(expiresAt), fmtTime(time.Now()), source, id)
 	} else {
 		_, err = d.db.ExecContext(ctx,
 			`UPDATE oai_accounts
@@ -363,7 +378,7 @@ func (d *DAO) ApplyRefreshResult(
                  refresh_error = '',
                  status = CASE WHEN status IN ('dead','suspicious') THEN 'healthy' ELSE status END
              WHERE id = ? AND deleted_at IS NULL`,
-			newATEnc, expiresAt, time.Now(), source, id)
+			newATEnc, fmtTime(expiresAt), fmtTime(time.Now()), source, id)
 	}
 	return err
 }
@@ -383,14 +398,14 @@ func (d *DAO) RecordRefreshError(ctx context.Context, id uint64, source string, 
                    ELSE 'dead'
                  END
              WHERE id = ? AND deleted_at IS NULL`,
-			time.Now(), source, reason, id)
+			fmtTime(time.Now()), source, reason, id)
 		return err
 	}
 	_, err := d.db.ExecContext(ctx,
 		`UPDATE oai_accounts
          SET last_refresh_at = ?, last_refresh_source = ?, refresh_error = ?
          WHERE id = ? AND deleted_at IS NULL`,
-		time.Now(), source, reason, id)
+		fmtTime(time.Now()), source, reason, id)
 	return err
 }
 
@@ -416,17 +431,11 @@ func (d *DAO) ApplyQuotaResult(ctx context.Context, id uint64, remaining, total 
               image_quota_reset_at  = ?,
               image_quota_updated_at = ?
           WHERE id = ? AND deleted_at IS NULL`
-	var reset interface{}
-	if resetAt != nil {
-		reset = *resetAt
-	} else {
-		reset = nil
-	}
 	_, err := d.db.ExecContext(ctx, q,
 		remaining, remaining,
 		total, total,
 		remaining, remaining,
-		reset, time.Now(), id)
+		fmtTimePtr(resetAt), fmtTime(time.Now()), id)
 	return err
 }
 
